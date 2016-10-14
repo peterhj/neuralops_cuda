@@ -1,0 +1,39 @@
+[package]
+name = "neuralops_cuda"
+version = "0.1.0"
+authors = ["Peter Jin <peterhaijin@gmail.com>"]
+build = "build.rs"
+
+#[features]
+#default = ["nnpack"]
+#mkl = ["mkl_dnn", "nnpack"]
+
+[lib]
+name = "neuralops_cuda"
+path = "src/lib.rs"
+
+#[[bin]]
+#name = "train-mnist-new"
+#path = "tools/train-mnist-new.rs"
+
+#[[bin]]
+#name = "train-cifar10-new"
+#path = "tools/train-cifar10-new.rs"
+
+[build-dependencies]
+gcc = "*"
+
+[dependencies]
+byteorder = "*"
+float = "*"
+libc = "*"
+rand = "*"
+cuda = { path = "../libcuda" }
+#densearray = { path = "../libdensearray" }
+devicemem_cuda = { path = "../libdevicemem_cuda" }
+#iter_utils = { path = "../libiter_utils" }
+#mkl_dnn = { path = "../libmkl_dnn", optional = true }
+#nnpack = { path = "../libnnpack", optional = true }
+operator = { path = "../liboperator" }
+rng = { path = "../librng" }
+sharedmem = { path = "../libsharedmem" }
