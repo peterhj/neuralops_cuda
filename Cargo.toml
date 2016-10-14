@@ -29,11 +29,13 @@ float = "*"
 libc = "*"
 rand = "*"
 cuda = { path = "../libcuda" }
-#densearray = { path = "../libdensearray" }
+cuda_dnn = { path = "../libcuda_dnn" }
+densearray = { path = "../libdensearray" }
 devicemem_cuda = { path = "../libdevicemem_cuda" }
 #iter_utils = { path = "../libiter_utils" }
 #mkl_dnn = { path = "../libmkl_dnn", optional = true }
 #nnpack = { path = "../libnnpack", optional = true }
+neuralops = { path = "../neuralops" }
 operator = { path = "../liboperator" }
 rng = { path = "../librng" }
 sharedmem = { path = "../libsharedmem" }

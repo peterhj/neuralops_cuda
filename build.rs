@@ -10,6 +10,7 @@ fn main() {
     .flag("-Xcompiler")
     .flag("\'-fPIC\'")
     .include("/usr/local/cuda/include")
+    .file("kernels/activate.cu")
     .file("kernels/image.cu")
     .file("kernels/interpolate.cu")
     .compile("libneuralops_cuda_kernels.a");
