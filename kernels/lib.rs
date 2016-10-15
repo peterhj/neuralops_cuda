@@ -1,6 +1,7 @@
-pub use neuralops_cuda_kernels::*;
+extern crate cuda;
+extern crate libc;
 
-/*use cuda::ffi::runtime::{cudaStream_t};
+use cuda::ffi::runtime::{cudaStream_t};
 use libc::*;
 
 #[link(name = "neuralops_cuda_kernels", kind = "static")]
@@ -84,4 +85,4 @@ extern "C" {
       targets: *const f32,
       in_delta: *mut f32,
       stream: cudaStream_t);
-}*/
+}

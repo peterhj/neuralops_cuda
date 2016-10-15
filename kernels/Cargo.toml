@@ -1,0 +1,17 @@
+[package]
+name = "neuralops_cuda_kernels"
+version = "0.1.0"
+authors = ["Peter Jin <peterhaijin@gmail.com>"]
+build = "build.rs"
+#workspace = ".."
+
+[lib]
+name = "neuralops_cuda_kernels"
+path = "lib.rs"
+
+[build-dependencies]
+gcc = "*"
+
+[dependencies]
+libc = "*"
+cuda = { path = "../../libcuda" }

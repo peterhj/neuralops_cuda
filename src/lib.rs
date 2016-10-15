@@ -5,6 +5,7 @@ extern crate devicemem_cuda;
 extern crate float;
 extern crate iter_utils;
 extern crate neuralops;
+extern crate neuralops_cuda_kernels;
 extern crate operator;
 extern crate rng;
 

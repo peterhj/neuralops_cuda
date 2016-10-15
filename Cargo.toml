@@ -2,7 +2,7 @@
 name = "neuralops_cuda"
 version = "0.1.0"
 authors = ["Peter Jin <peterhaijin@gmail.com>"]
-build = "build.rs"
+#build = "build.rs"
 
 #[features]
 #default = ["nnpack"]
@@ -24,10 +24,11 @@ path = "tools/train-mnist-new.rs"
 #name = "train-cifar10-new"
 #path = "tools/train-cifar10-new.rs"
 
-[build-dependencies]
-gcc = "*"
+#[build-dependencies]
+#gcc = "*"
 
 [dependencies]
+neuralops_cuda_kernels = { path = "kernels" }
 byteorder = "*"
 float = "*"
 libc = "*"
