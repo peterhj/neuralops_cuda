@@ -13,6 +13,8 @@ fn main() {
     .file("kernels/activate.cu")
     .file("kernels/image.cu")
     .file("kernels/interpolate.cu")
+    .file("kernels/map.cu")
+    .file("kernels/reduce.cu")
     .file("kernels/softmax.cu")
     .compile("libneuralops_cuda_kernels.a");
 

@@ -26,7 +26,7 @@ impl DeviceSoftmaxKernel {
     }
   }
 
-  pub fn _forward<'a>(&self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, targets: DeviceMemRef<'a, f32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+  pub fn _forward<'a>(&mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, targets: DeviceMemRef<'a, f32>, mut hats: DeviceMemRefMut<'a, u32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
     assert!(batch_size <= self.batch_sz);
 
     in_buf.wait(&conn);
@@ -35,10 +35,44 @@ impl DeviceSoftmaxKernel {
     targets.wait(&conn);
     out_buf.wait(&conn);
 
-    // FIXME
-
+    // FIXME: copy only `batch_size * self.in_dim` amount.
+    self.logit.as_mut().copy(in_buf.clone(), conn.clone());
+    assert!(self.in_dim <= 1024);
+    unsafe { neuralops_cuda_blockreduce_max_argmax(
+        self.logit.as_ref().as_ptr(),
+        self.in_dim,
+        batch_size,
+        self.max_logit.as_mut().as_mut_ptr(),
+        hats.as_mut_ptr(),
+        conn.stream().ptr,
+    ) };
+    unsafe { neuralops_cuda_batchmap_add(
+        self.logit.as_mut().as_mut_ptr(),
+        self.in_dim,
+        batch_size,
+        -1.0,
+        self.max_logit.as_ref().as_ptr(),
+        conn.stream().ptr,
+    ) };
+    // FIXME: copy only `batch_size * self.in_dim` amount.
+    self.factor.as_mut().copy(self.logit.as_ref(), conn.clone());
+    unsafe { neuralops_cuda_blockreduce_sum(
+        self.logit.as_ref().as_ptr(),
+        self.in_dim,
+        batch_size,
+        0.0,
+        self.sum_factor.as_mut().as_mut_ptr(),
+        conn.stream().ptr,
+    ) };
+    unsafe { neuralops_cuda_batchmap_div(
+        self.factor.as_mut().as_mut_ptr(),
+        self.in_dim,
+        batch_size,
+        self.sum_factor.as_ref().as_ptr(),
+        conn.stream().ptr,
+    ) };
     unsafe { neuralops_cuda_softmax_nll_loss_fwd(
-        in_buf.as_ptr(),
+        self.factor.as_ref().as_ptr(),
         self.in_dim,
         batch_size,
         labels.as_ptr(),

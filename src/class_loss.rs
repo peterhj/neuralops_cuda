@@ -1,5 +1,5 @@
 use prelude::*;
-//use activate::{DeviceActivateKernel};
+use softmax::{DeviceSoftmaxKernel};
 
 use densearray::prelude::*;
 use devicemem_cuda::prelude::*;
@@ -23,26 +23,19 @@ pub struct DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel {
   in_:      DeviceOutput,
   out:      DeviceOutput,
   batch_nr: Option<usize>,
-  max_log:  Vec<f32>,
-  facts:    Vec<f32>,
-  sum_fact: Vec<f32>,
-  hats:     Vec<u32>,
-  losses:   Vec<f32>,
+  losses:   DeviceMem<f32>,
+  hats:     DeviceMem<u32>,
   acc_loss: f32,
   reg_loss: f32,
   accuracy: usize,
-  labels:   Vec<u32>,
-  weights:  Vec<f32>,
+  labels:   DeviceMem<u32>,
+  weights:  DeviceMem<f32>,
+  targets:  DeviceMem<f32>,
+  softmax:  DeviceSoftmaxKernel,
 }
 
 impl<S> DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel {
   pub fn new<InOp>(cfg: ClassLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, conn: DeviceConn) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
-    let mut max_log = Vec::with_capacity(cfg.batch_sz);
-    max_log.resize(cfg.batch_sz, 0.0);
-    let mut facts = Vec::with_capacity(cfg.batch_sz * cfg.num_classes);
-    facts.resize(cfg.batch_sz * cfg.num_classes, 0.0);
-    let mut sum_fact = Vec::with_capacity(cfg.batch_sz);
-    sum_fact.resize(cfg.batch_sz, 0.0);
     let mut hats = Vec::with_capacity(cfg.batch_sz);
     hats.resize(cfg.batch_sz, 0);
     let mut losses = Vec::with_capacity(cfg.batch_sz);
@@ -58,18 +51,17 @@ impl<S> DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel {
       conn:     conn.clone(),
       in_op:    prev_op,
       in_:      in_,
-      out:      DeviceOutput::new(cfg.batch_sz, cfg.num_classes, cap, conn),
+      out:      DeviceOutput::new(cfg.batch_sz, cfg.num_classes, cap, conn.clone()),
       batch_nr: None,
-      max_log:  max_log,
-      facts:    facts,
-      sum_fact: sum_fact,
-      hats:     hats,
-      losses:   losses,
+      losses:   DeviceMem::zeros(cfg.batch_sz, conn.clone()),
+      hats:     DeviceMem::zeros(cfg.batch_sz, conn.clone()),
       acc_loss: 0.0,
       reg_loss: 0.0,
       accuracy: 0,
-      labels:   labels,
-      weights:  weights,
+      labels:   DeviceMem::zeros(cfg.batch_sz, conn.clone()),
+      weights:  DeviceMem::zeros(cfg.batch_sz, conn.clone()),
+      targets:  DeviceMem::zeros(cfg.batch_sz, conn.clone()),
+      softmax:  DeviceSoftmaxKernel::new(cfg.batch_sz, cfg.num_classes, conn),
     }))
   }
 }
@@ -128,15 +120,16 @@ impl<S> NewDiffOperator<S> for DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel
     let actual_batch_size = samples.len();
     assert!(actual_batch_size <= self.cfg.batch_sz);
     for (idx, sample) in samples.iter().enumerate() {
+      // FIXME(20161014)
       if let Some(cat) = sample.class() {
         assert!(cat < self.cfg.num_classes as u32);
         assert!(cat != u32::MAX);
-        self.labels[idx] = cat;
+        //self.labels[idx] = cat;
       } else {
-        self.labels[idx] = u32::MAX;
+        //self.labels[idx] = u32::MAX;
       }
       // FIXME(20161013): sample trait bounds.
-      self.weights[idx] = 1.0;
+      //self.weights[idx] = 1.0;
       //self.weights[idx] = sample.weight().unwrap_or(1.0);
     }
     self.out.batch_sz.set(actual_batch_size);
@@ -203,6 +196,10 @@ impl<S> NewDiffOperator<S> for DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel
     if let Some(ref in_grad) = self.in_.grad.as_ref() {
       let out_buf = self.out.buf.borrow();
       let mut in_grad = in_grad.borrow_mut();
+
+      // FIXME
+      //self.softmax.backward();
+
       /*let mut p = 0;
       for idx in 0 .. batch_size {
         for k in 0 .. self.cfg.num_classes {
