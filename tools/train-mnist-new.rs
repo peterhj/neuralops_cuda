@@ -9,9 +9,6 @@ use devicemem_cuda::prelude::*;
 use neuralops::prelude::*;
 use neuralops::data::{CyclicDataIter, SubsampleDataIter};
 use neuralops::data::mnist::{MnistDataShard};
-//use neuralops::affine::{NewAffineOperator};
-//use neuralops::input::{VarInputPreproc, NewVarInputOperator};
-//use neuralops::class_loss::{SoftmaxNLLClassLoss};
 use neuralops_cuda::prelude::*;
 use operator::prelude::*;
 use operator::opt::sgd_new::{SgdConfig, SgdWorker};
@@ -47,20 +44,40 @@ fn main() {
       VarInputPreproc::Scale{scale: 1.0 / 255.0},
     ],
   }, OpCapability::Backward, stream.clone());
-  let affine1 = DeviceAffineOperator::new(AffineOperatorConfig{
+  /*let affine1 = DeviceAffineOperator::new(AffineOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     784,
     out_dim:    50,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
+  }, OpCapability::Backward, input, 0, stream.clone());*/
+  let conv1 = DeviceConv2dOperator::new(Conv2dOperatorConfig{
+    batch_sz:   batch_sz,
+    in_dim:     (28, 28, 1),
+    kernel_w:   5,  kernel_h:   5,
+    stride_w:   2,  stride_h:   2,
+    pad_w:      2,  pad_h:      2,
+    out_chan:   16,
+    act_kind:   ActivationKind::Rect,
+    w_init:     ParamInitKind::Kaiming,
   }, OpCapability::Backward, input, 0, stream.clone());
+  let conv2 = DeviceConv2dOperator::new(Conv2dOperatorConfig{
+    batch_sz:   batch_sz,
+    in_dim:     (14, 14, 16),
+    kernel_w:   3,  kernel_h:   3,
+    stride_w:   1,  stride_h:   1,
+    pad_w:      1,  pad_h:      1,
+    out_chan:   32,
+    act_kind:   ActivationKind::Rect,
+    w_init:     ParamInitKind::Kaiming,
+  }, OpCapability::Backward, conv1, 0, stream.clone());
   let affine2 = DeviceAffineOperator::new(AffineOperatorConfig{
     batch_sz:   batch_sz,
-    in_dim:     50,
+    in_dim:     14 * 14 * 32,
     out_dim:    10,
     act_kind:   ActivationKind::Identity,
     w_init:     ParamInitKind::Kaiming,
-  }, OpCapability::Backward, affine1, 0, stream.clone());
+  }, OpCapability::Backward, conv2, 0, stream.clone());
   let loss = DeviceSoftmaxNLLClassLoss::new(ClassLossConfig{
     batch_sz:       batch_sz,
     num_classes:    10,
@@ -69,7 +86,7 @@ fn main() {
   let sgd_cfg = SgdConfig{
     batch_sz:       batch_sz,
     minibatch_sz:   batch_sz,
-    step_size:      StepSize::Constant(0.1),
+    step_size:      StepSize::Constant(0.01),
     momentum:       Some(GradientMomentum::Nesterov(0.9)),
   };
   let mut sgd = SgdWorker::new(sgd_cfg, loss);
