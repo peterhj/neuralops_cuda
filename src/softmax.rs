@@ -45,7 +45,7 @@ impl DeviceSoftmaxKernel {
         batch_size,
         self.max_logit.as_mut().as_mut_ptr(),
         hats.as_mut_ptr(),
-        conn.stream().ptr,
+        conn.raw_stream().ptr,
     ) };
     unsafe { neuralops_cuda_batchmap_add(
         self.logit.as_mut().as_mut_ptr(),
@@ -53,7 +53,7 @@ impl DeviceSoftmaxKernel {
         batch_size,
         -1.0,
         self.max_logit.as_ref().as_ptr(),
-        conn.stream().ptr,
+        conn.raw_stream().ptr,
     ) };
 
     in_buf.post(&conn);
@@ -78,14 +78,14 @@ impl DeviceSoftmaxKernel {
         batch_size,
         0.0,
         self.sum_factor.as_mut().as_mut_ptr(),
-        conn.stream().ptr,
+        conn.raw_stream().ptr,
     ) };
     unsafe { neuralops_cuda_batchmap_div(
         self.factor.as_mut().as_mut_ptr(),
         self.in_dim,
         batch_size,
         self.sum_factor.as_ref().as_ptr(),
-        conn.stream().ptr,
+        conn.raw_stream().ptr,
     ) };
     unsafe { neuralops_cuda_softmax_nll_loss_fwd(
         self.factor.as_ref().as_ptr(),
@@ -95,7 +95,7 @@ impl DeviceSoftmaxKernel {
         weights.as_ptr(),
         targets.as_ptr(),
         out_buf.as_mut_ptr(),
-        conn.stream().ptr,
+        conn.raw_stream().ptr,
     ) };
 
     in_buf.post(&conn);
@@ -124,7 +124,7 @@ impl DeviceSoftmaxKernel {
         weights.as_ptr(),
         targets.as_ptr(),
         in_grad.as_mut_ptr(),
-        conn.stream().ptr,
+        conn.raw_stream().ptr,
     ) };
 
     in_buf.post(&conn);

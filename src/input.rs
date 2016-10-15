@@ -16,7 +16,7 @@ use std::rc::{Rc};
 pub struct DeviceVarInputOperator<S> {
   cfg:      VarInputOperatorConfig,
   node:     OperatorNode,
-  conn:     DeviceConn,
+  stream:   DeviceStream,
   out:      DeviceOutput,
   rng:      Xorshiftplus128Rng,
   r_state:  Vec<u64>,
@@ -28,17 +28,17 @@ pub struct DeviceVarInputOperator<S> {
 }
 
 impl<S> DeviceVarInputOperator<S> where S: SampleDatum<[f32]> {
-  pub fn new(cfg: VarInputOperatorConfig, cap: OpCapability, conn: DeviceConn) -> Rc<RefCell<DeviceVarInputOperator<S>>> {
+  pub fn new(cfg: VarInputOperatorConfig, cap: OpCapability, stream: DeviceStream) -> Rc<RefCell<DeviceVarInputOperator<S>>> {
     let batch_sz = cfg.batch_sz;
     let max_stride = cfg.max_stride;
     let mut h_buf = Vec::with_capacity(batch_sz * max_stride);
     h_buf.resize(batch_sz * max_stride, 0.0);
-    let tmp_buf = DeviceMem::zeros(batch_sz * max_stride, conn.clone());
-    let out = DeviceOutput::new(batch_sz, max_stride, cap, conn.clone());
+    let tmp_buf = DeviceMem::zeros(batch_sz * max_stride, stream.conn());
+    let out = DeviceOutput::new(batch_sz, max_stride, cap, stream.conn());
     Rc::new(RefCell::new(DeviceVarInputOperator{
       cfg:      cfg,
       node:     OperatorNode::default(),
-      conn:     conn,
+      stream:   stream,
       out:      out,
       rng:      Xorshiftplus128Rng::new(&mut thread_rng()),
       r_state:  vec![],
@@ -116,7 +116,7 @@ impl<S> NewDiffOperator<S> for DeviceVarInputOperator<S> where S: SampleDatum<[f
     // FIXME(20161014): could also do asynchronous loads in the previous loop.
     self.out.buf.borrow_mut().as_mut()
       .slice_mut(0, batch_size * self.cfg.max_stride)
-      .load_sync(&self.h_buf[ .. batch_size * self.cfg.max_stride], self.conn.clone());
+      .load_sync(&self.h_buf[ .. batch_size * self.cfg.max_stride], self.stream.conn());
   }
 
   fn _forward(&mut self, phase: OpPhase) {
@@ -134,7 +134,7 @@ impl<S> NewDiffOperator<S> for DeviceVarInputOperator<S> where S: SampleDatum<[f
             out_buf.as_mut()
               .slice_mut(idx * self.cfg.max_stride, (idx+1) * self.cfg.max_stride)
               .reshape_mut(dim.flat_len())
-              .scale(scale, self.conn.clone());
+              .scale(scale, self.stream.conn());
           }
         }
         &VarInputPreproc::ChannelShift{ref shift} => {
@@ -145,7 +145,7 @@ impl<S> NewDiffOperator<S> for DeviceVarInputOperator<S> where S: SampleDatum<[f
               out_buf.as_mut()
                 .slice_mut(a * space_len + idx * self.cfg.max_stride, (idx+1) * self.cfg.max_stride)
                 .reshape_mut(space_len)
-                .add_scalar(-shift[a], self.conn.clone());
+                .add_scalar(-shift[a], self.stream.conn());
             }
           }
         }
@@ -172,12 +172,12 @@ impl<S> NewDiffOperator<S> for DeviceVarInputOperator<S> where S: SampleDatum<[f
                     in_dim.0, in_dim.1, in_dim.2,
                     tmp.as_mut_ptr(),
                     out_dim.0, out_dim.1,
-                    self.conn.stream().ptr,
+                    self.stream.conn().raw_stream().ptr,
                 ) };
               }
               let tmp = self.tmp_buf.as_ref().slice(idx * out_len, (idx+1) * out_len);
               let mut out = out_buf.as_mut().slice_mut(idx * self.cfg.max_stride, idx * self.cfg.max_stride + out_len);
-              out.copy(tmp, self.conn.clone());
+              out.copy(tmp, self.stream.conn());
               self.tmp_dims[idx] = out_dim;
             }
           }
@@ -202,12 +202,12 @@ impl<S> NewDiffOperator<S> for DeviceVarInputOperator<S> where S: SampleDatum<[f
                     offset_x, offset_y,
                     tmp.as_mut_ptr(),
                     out_dim.0, out_dim.1,
-                    self.conn.stream().ptr,
+                    self.stream.conn().raw_stream().ptr,
                 ) };
               }
               let tmp = self.tmp_buf.as_ref().slice(idx * out_len, (idx+1) * out_len);
               let mut out = out_buf.as_mut().slice_mut(idx * self.cfg.max_stride, idx * self.cfg.max_stride + out_len);
-              out.copy(tmp, self.conn.clone());
+              out.copy(tmp, self.stream.conn());
               self.tmp_dims[idx] = out_dim;
             }
           }
@@ -231,12 +231,12 @@ impl<S> NewDiffOperator<S> for DeviceVarInputOperator<S> where S: SampleDatum<[f
                     offset_x, offset_y,
                     tmp.as_mut_ptr(),
                     out_dim.0, out_dim.1,
-                    self.conn.stream().ptr,
+                    self.stream.conn().raw_stream().ptr,
                 ) };
               }
               let tmp = self.tmp_buf.as_ref().slice(idx * out_len, (idx+1) * out_len);
               let mut out = out_buf.as_mut().slice_mut(idx * self.cfg.max_stride, idx * self.cfg.max_stride + out_len);
-              out.copy(tmp, self.conn.clone());
+              out.copy(tmp, self.stream.conn());
               self.tmp_dims[idx] = out_dim;
             }
           }
@@ -257,12 +257,12 @@ impl<S> NewDiffOperator<S> for DeviceVarInputOperator<S> where S: SampleDatum<[f
                         out.as_ptr(),
                         out_dim.0, out_dim.1, out_dim.2,
                         tmp.as_mut_ptr(),
-                        self.conn.stream().ptr,
+                        self.stream.conn().raw_stream().ptr,
                     ) };
                   }
                   let tmp = self.tmp_buf.as_ref().slice(idx * out_len, (idx+1) * out_len);
                   let mut out = out_buf.as_mut().slice_mut(idx * self.cfg.max_stride, idx * self.cfg.max_stride + out_len);
-                  out.copy(tmp, self.conn.clone());
+                  out.copy(tmp, self.stream.conn());
                 }
                 _ => unreachable!(),
               }
@@ -277,11 +277,11 @@ impl<S> NewDiffOperator<S> for DeviceVarInputOperator<S> where S: SampleDatum<[f
       assert_eq!(self.cfg.out_dim, self.tmp_dims[idx]);
       let out = out_buf.as_ref().slice(idx * self.cfg.max_stride, (idx+1) * self.cfg.max_stride);
       let mut tmp = self.tmp_buf.as_mut().slice_mut(idx * out_len, (idx+1) * out_len);
-      tmp.copy(out, self.conn.clone());
+      tmp.copy(out, self.stream.conn());
     }
     let tmp = self.tmp_buf.as_ref().slice(0, batch_size * out_len);
     let mut out = out_buf.as_mut().slice_mut(0, batch_size * out_len);
-    out.copy(tmp, self.conn.clone());
+    out.copy(tmp, self.stream.conn());
   }
 
   fn _backward(&mut self) {

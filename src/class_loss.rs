@@ -18,7 +18,7 @@ use std::rc::{Rc};
 pub struct DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel {
   cfg:      ClassLossConfig,
   node:     OperatorNode,
-  conn:     DeviceConn,
+  stream:   DeviceStream,
   in_op:    Rc<RefCell<NewDiffOperator<S, IoBuf=[f32]>>>,
   in_:      DeviceOutput,
   out:      DeviceOutput,
@@ -41,12 +41,12 @@ pub struct DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel {
 }
 
 impl<S> DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel {
-  pub fn new<InOp>(cfg: ClassLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, conn: DeviceConn) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
+  pub fn new<InOp>(cfg: ClassLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
     let in_ = prev_op.borrow()._output(prev_arm);
-    let mut weights = DeviceMem::zeros(cfg.batch_sz, conn.clone());
-    weights.as_mut().set_constant(1.0, conn.clone());
-    let mut targets = DeviceMem::zeros(cfg.batch_sz, conn.clone());
-    targets.as_mut().set_constant(1.0, conn.clone());
+    let mut weights = DeviceMem::zeros(cfg.batch_sz, stream.conn());
+    weights.as_mut().set_constant(1.0, stream.conn());
+    let mut targets = DeviceMem::zeros(cfg.batch_sz, stream.conn());
+    targets.as_mut().set_constant(1.0, stream.conn());
     let mut labels_h = Vec::with_capacity(cfg.batch_sz);
     labels_h.resize(cfg.batch_sz, 0);
     let mut ws_h = Vec::with_capacity(cfg.batch_sz);
@@ -60,18 +60,18 @@ impl<S> DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel {
     Rc::new(RefCell::new(DeviceSoftmaxNLLClassLoss{
       cfg:      cfg,
       node:     OperatorNode::default(),
-      conn:     conn.clone(),
+      stream:   stream.clone(),
       in_op:    prev_op,
       in_:      in_,
-      out:      DeviceOutput::new(cfg.batch_sz, 1, cap, conn.clone()),
+      out:      DeviceOutput::new(cfg.batch_sz, 1, cap, stream.conn()),
       batch_nr: None,
-      losses:   DeviceMem::zeros(cfg.batch_sz, conn.clone()),
-      probs:    DeviceMem::zeros(cfg.batch_sz * cfg.num_classes, conn.clone()),
-      hats:     DeviceMem::zeros(cfg.batch_sz, conn.clone()),
+      losses:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      probs:    DeviceMem::zeros(cfg.batch_sz * cfg.num_classes, stream.conn()),
+      hats:     DeviceMem::zeros(cfg.batch_sz, stream.conn()),
       acc_loss: 0.0,
       reg_loss: 0.0,
       accuracy: 0,
-      labels:   DeviceMem::zeros(cfg.batch_sz, conn.clone()),
+      labels:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
       weights:  weights,
       targets:  targets,
       labels_h: labels_h,
@@ -79,7 +79,7 @@ impl<S> DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel {
       ts_h:     ts_h,
       hats_h:   hats_h,
       losses_h: losses_h,
-      softmax:  DeviceSoftmaxKernel::new(cfg.batch_sz, cfg.num_classes, conn),
+      softmax:  DeviceSoftmaxKernel::new(cfg.batch_sz, cfg.num_classes, stream.conn()),
     }))
   }
 }
@@ -149,7 +149,7 @@ impl<S> NewDiffOperator<S> for DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel
       //self.weights[idx] = 1.0;
       //self.weights[idx] = sample.weight().unwrap_or(1.0);
     }
-    self.labels.as_mut().load_sync(&self.labels_h, self.conn.clone());
+    self.labels.as_mut().load_sync(&self.labels_h, self.stream.conn());
     self.out.batch_sz.set(actual_batch_size);
     self.batch_nr = Some(self.batch_nr.map_or(0, |batch| batch + 1));
   }
@@ -169,11 +169,11 @@ impl<S> NewDiffOperator<S> for DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel
         self.hats.as_mut(),
         self.probs.as_mut(),
         out_buf.as_mut(),
-        self.conn.clone(),
+        self.stream.conn(),
     );
 
-    out_buf.as_ref().store_sync(&mut self.losses_h, self.conn.clone());
-    self.hats.as_ref().store_sync(&mut self.hats_h, self.conn.clone());
+    out_buf.as_ref().store_sync(&mut self.losses_h, self.stream.conn());
+    self.hats.as_ref().store_sync(&mut self.hats_h, self.stream.conn());
     let mut batch_loss = 0.0;
     let mut batch_accuracy = 0;
     for idx in 0 .. batch_size {
@@ -197,7 +197,7 @@ impl<S> NewDiffOperator<S> for DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel
           self.weights.as_ref(),
           self.targets.as_ref(),
           in_grad.as_mut(),
-          self.conn.clone(),
+          self.stream.conn(),
       );
     }
   }

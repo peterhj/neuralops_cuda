@@ -30,7 +30,7 @@ impl DeviceActivateKernel {
             in_buf.as_ptr(),
             batch_size * self.out_dim,
             out_buf.as_mut_ptr(),
-            conn.stream().ptr,
+            conn.raw_stream().ptr,
         ) };
         in_buf.post(&conn);
         out_buf.post(&conn);
@@ -53,7 +53,7 @@ impl DeviceActivateKernel {
             batch_size * self.out_dim,
             out_grad.as_ptr(),
             in_grad.as_mut_ptr(),
-            conn.stream().ptr,
+            conn.raw_stream().ptr,
         ) };
         in_buf.post(&conn);
         out_grad.post(&conn);

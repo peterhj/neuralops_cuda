@@ -23,8 +23,7 @@ use std::path::{PathBuf};
 fn main() {
   let batch_sz = 32;
 
-  let device = Device::new(0);
-  let conn = device.conn();
+  let stream = DeviceStream::new(0);
 
   let mut train_data =
       SubsampleDataIter::new(
@@ -47,25 +46,25 @@ fn main() {
     preprocs:   vec![
       VarInputPreproc::Scale{scale: 1.0 / 255.0},
     ],
-  }, OpCapability::Backward, conn.clone());
+  }, OpCapability::Backward, stream.clone());
   let affine1 = DeviceAffineOperator::new(AffineOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     784,
     out_dim:    50,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
-  }, OpCapability::Backward, input, 0, conn.clone());
+  }, OpCapability::Backward, input, 0, stream.clone());
   let affine2 = DeviceAffineOperator::new(AffineOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     50,
     out_dim:    10,
     act_kind:   ActivationKind::Identity,
     w_init:     ParamInitKind::Kaiming,
-  }, OpCapability::Backward, affine1, 0, conn.clone());
+  }, OpCapability::Backward, affine1, 0, stream.clone());
   let loss = DeviceSoftmaxNLLClassLoss::new(ClassLossConfig{
     batch_sz:       batch_sz,
     num_classes:    10,
-  }, OpCapability::Backward, affine2, 0, conn.clone());
+  }, OpCapability::Backward, affine2, 0, stream.clone());
 
   let sgd_cfg = SgdConfig{
     batch_sz:       batch_sz,
