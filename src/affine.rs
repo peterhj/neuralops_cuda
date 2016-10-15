@@ -183,7 +183,7 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
           0.0,
           self.conn.clone(),
       );
-    /*for j in 0 .. batch_size {
+    for j in 0 .. batch_size {
       self.tmp_buf.as_mut().reshape_mut((self.cfg.out_dim, batch_size))
         .view_mut((0, j), (self.cfg.out_dim, j+1))
         .matrix_add(
@@ -191,7 +191,7 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
             self.bias.as_view().reshape((self.cfg.out_dim, 1)),
             self.conn.clone(),
         );
-    }*/
+    }
 
     let mut out_buf = self.out.buf.borrow_mut();
     self.act_kern._forward(batch_size, self.tmp_buf.as_ref(), out_buf.as_mut(), self.conn.clone());
@@ -212,7 +212,7 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
           1.0,
           self.conn.clone(),
       );
-    /*for j in 0 .. batch_size {
+    for j in 0 .. batch_size {
       self.b_grad.as_view_mut().reshape_mut((self.cfg.out_dim, 1))
         .matrix_add(
             1.0,
@@ -220,7 +220,7 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
               .view((0, j), (self.cfg.out_dim, j+1)),
             self.conn.clone(),
         );
-    }*/
+    }
 
     if let Some(in_grad) = self.in_.grad.as_ref() {
       let mut in_grad = in_grad.borrow_mut();
