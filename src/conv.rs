@@ -26,14 +26,40 @@ pub struct DeviceConv2dScaleKernel {
 }
 
 impl DeviceConv2dScaleKernel {
-  pub fn new() -> Self {
+  pub fn new(dim: (usize, usize, usize), conn: DeviceConn) -> Self {
     unimplemented!();
   }
 
-  pub fn _forward(&mut self) {
+  pub fn _forward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+    // FIXME: wait.
+    unsafe { neuralops_cuda_conv2d_scale_fwd(
+        in_buf.as_ptr(),
+        dim.0 * dim.1,
+        dim.2,
+        batch_size,
+        self.scale.as_view().as_ptr(),
+        self.bias.as_view().as_ptr(),
+        out_buf.as_mut_ptr(),
+        conn.raw_stream().ptr,
+    ) };
+    // FIXME: post.
   }
 
-  pub fn _backward(&mut self) {
+  pub fn _backward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, out_grad: DeviceMemRef<'a, f32>, mut in_grad: DeviceMemRef<'a, f32>, conn: DeviceConn) {
+    // FIXME: wait.
+    unsafe { neuralops_cuda_conv2d_scale_bwd(
+        in_buf.as_ptr(),
+        dim.0 * dim.1,
+        dim.2,
+        batch_size,
+        out_grad.as_ptr(),
+        self.scale.as_view().as_ptr(),
+        self.scale_g.as_view_mut().as_mut_ptr(),
+        self.bias_g.as_view_mut().as_mut_ptr(),
+        in_grad.as_mut_ptr(),
+        conn.raw_stream().ptr,
+    ) };
+    // FIXME: post.
   }
 }
 
@@ -42,31 +68,99 @@ pub struct DeviceConv2dBatchNormKernel {
   pub epsilon:  f32,
   pub count:    usize,
   pub mean:     DeviceArray1d<f32>,
+  pub mean_g:   DeviceArray1d<f32>,
   pub mean_acc: DeviceArray1d<f32>,
   pub run_mean: DeviceArray1d<f32>,
   pub var:      DeviceArray1d<f32>,
+  pub var_g:    DeviceArray1d<f32>,
   pub var_acc:  DeviceArray1d<f32>,
   pub run_var:  DeviceArray1d<f32>,
 }
 
 impl DeviceConv2dBatchNormKernel {
-  pub fn new() -> Self {
+  pub fn new(dim: (usize, usize, usize), epsilon: f32, conn: DeviceConn) -> Self {
     unimplemented!();
   }
 
-  pub fn _forward(&mut self) {
+  pub fn _forward_inference<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+    // FIXME: wait.
+    unsafe { neuralops_cuda_conv2d_whiten_fwd(
+        in_buf.as_ptr(),
+        dim.0 * dim.1,
+        dim.2,
+        batch_size,
+        self.run_mean.as_view().as_ptr(),
+        self.run_var.as_view().as_ptr(),
+        out_buf.as_mut_ptr(),
+        conn.raw_stream().ptr,
+    ) };
+    // FIXME: post.
   }
 
-  pub fn _backward(&mut self) {
+  pub fn _forward_learning<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+    // FIXME: wait.
+    self.mean.as_view_mut().set_scalar(0.0, conn.clone());
+    self.var.as_view_mut().set_scalar(0.0, conn.clone());
+    unsafe { neuralops_cuda_conv2d_mean_fwd(
+        in_buf.as_ptr(),
+        dim.0 * dim.1,
+        dim.2,
+        batch_size,
+        self.mean.as_view_mut().as_mut_ptr(),
+        conn.raw_stream().ptr,
+    ) };
+    unsafe { neuralops_cuda_conv2d_var_fwd(
+        in_buf.as_ptr(),
+        dim.0 * dim.1,
+        dim.2,
+        batch_size,
+        self.mean.as_view().as_ptr(),
+        self.var.as_view_mut().as_mut_ptr(),
+        conn.raw_stream().ptr,
+    ) };
+    unsafe { neuralops_cuda_conv2d_whiten_fwd(
+        in_buf.as_ptr(),
+        dim.0 * dim.1,
+        dim.2,
+        batch_size,
+        self.mean.as_view().as_ptr(),
+        self.var.as_view().as_ptr(),
+        self.epsilon,
+        out_buf.as_mut_ptr(),
+        conn.raw_stream().ptr,
+    ) };
+    // FIXME: accumulate online mean/variance between batches.
+    self.count += 1;
+    // FIXME: post.
+  }
+
+  pub fn _backward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, out_grad: DeviceMemRef<'a, f32>, mut in_grad: DeviceMemRef<'a, f32>, conn: DeviceConn) {
+    // FIXME: wait.
+    unsafe { neuralops_cuda_conv2d_batchnorm_bwd(
+        in_buf.as_ptr(),
+        dim.0 * dim.1,
+        dim.2,
+        batch_size,
+        out_grad.as_ptr(),
+        self.mean.as_view().as_ptr(),
+        self.var.as_view().as_ptr(),
+        self.epsilon,
+        self.mean_g.as_view_mut().as_mut_ptr(),
+        self.var_g.as_view_mut().as_mut_ptr(),
+        in_grad.as_mut_ptr(),
+        conn.raw_stream().ptr,
+    ) };
+    // FIXME: post.
   }
 
   pub fn _update(&mut self, avg_rate: f32, conn: DeviceConn) {
-    self.run_mean.as_view_mut().average(avg_rate, self.mean_acc.as_view(), conn.clone());
-    self.run_var.as_view_mut().average(avg_rate, self.var_acc.as_view(), conn.clone());
-    self.mean.as_view_mut().set_scalar(0.0, conn.clone());
-    self.mean_acc.as_view_mut().set_scalar(0.0, conn.clone());
-    self.var.as_view_mut().set_scalar(0.0, conn.clone());
-    self.var_acc.as_view_mut().set_scalar(0.0, conn.clone());
+    self.run_mean.as_view_mut().average(avg_rate, self.mean.as_view(), conn.clone());
+    self.run_var.as_view_mut().average(avg_rate, self.var.as_view(), conn.clone());
+    //self.run_mean.as_view_mut().average(avg_rate, self.mean_acc.as_view(), conn.clone());
+    //self.run_var.as_view_mut().average(avg_rate, self.var_acc.as_view(), conn.clone());
+    //self.mean_acc.as_view_mut().set_scalar(0.0, conn.clone());
+    //self.var_acc.as_view_mut().set_scalar(0.0, conn.clone());
+    self.count = 0;
   }
 }
 

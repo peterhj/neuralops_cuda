@@ -18,6 +18,66 @@ extern "C" {
       in_delta: *mut f32,
       stream: cudaStream_t);
 
+  pub fn neuralops_cuda_conv2d_scale_fwd(
+      in_buf: *const f32,
+      spatial_dim: size_t,
+      num_channels: size_t,
+      batch_size: size_t,
+      scale: *const f32,
+      bias: *const f32,
+      out_buf: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_conv2d_scale_bwd(
+      in_buf: *const f32,
+      spatial_dim: size_t,
+      num_channels: size_t,
+      batch_size: size_t,
+      out_grad: *const f32,
+      scale: *const f32,
+      scale_grad: *mut f32,
+      bias_grad: *mut f32,
+      in_grad: *mut f32,
+      stream: cudaStream_t);
+
+  pub fn neuralops_cuda_conv2d_whiten_fwd(
+      in_buf: *const f32,
+      spatial_dim: size_t,
+      num_channels: size_t,
+      batch_size: size_t,
+      mean: *const f32,
+      var: *const f32,
+      epsilon: f32,
+      out_buf: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_conv2d_mean_fwd(
+      in_buf: *const f32,
+      spatial_dim: size_t,
+      num_channels: size_t,
+      batch_size: size_t,
+      mean: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_conv2d_var_fwd(
+      in_buf: *const f32,
+      spatial_dim: size_t,
+      num_channels: size_t,
+      batch_size: size_t,
+      mean: *const f32,
+      var: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_conv2d_batchnorm_bwd(
+      in_buf: *const f32,
+      spatial_dim: size_t,
+      num_channels: size_t,
+      batch_size: size_t,
+      out_grad: *const f32,
+      mean: *const f32,
+      var: *const f32,
+      epsilon: f32,
+      mean_grad: *mut f32,
+      var_grad: *mut f32,
+      in_grad: *mut f32,
+      stream: cudaStream_t);
+
   pub fn neuralops_cuda_image2d_crop(
       in_pixels: *const f32,
       in_width: size_t, in_height: size_t, channels: size_t,

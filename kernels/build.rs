@@ -12,6 +12,8 @@ fn main() {
     .pic(true)
     .include("/usr/local/cuda/include")
     .file("activate.cu")
+    .file("conv.cu")
+    .file("conv_batchnorm.cu")
     .file("image.cu")
     .file("interpolate.cu")
     .file("map.cu")
