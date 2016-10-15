@@ -20,9 +20,9 @@ path = "tools/train-mnist-cpu.rs"
 name = "train-mnist-new"
 path = "tools/train-mnist-new.rs"
 
-#[[bin]]
-#name = "train-cifar10-new"
-#path = "tools/train-cifar10-new.rs"
+[[bin]]
+name = "train-cifar10-new"
+path = "tools/train-cifar10-new.rs"
 
 #[build-dependencies]
 #gcc = "*"

@@ -38,7 +38,8 @@ impl<S> DevicePool2dOperator<S> {
         cfg.pad_w,    cfg.pad_h,
         match cfg.kind {
           PoolKind::Max     => cudnnPoolingMode_t::Max,
-          PoolKind::Average => cudnnPoolingMode_t::AverageCountExcludingPadding,
+          PoolKind::Average => cudnnPoolingMode_t::AverageCountIncludingPadding,
+          //PoolKind::Average => cudnnPoolingMode_t::AverageCountExcludingPadding,
         },
     ) {
       Ok(pooling) => pooling,

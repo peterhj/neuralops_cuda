@@ -1,5 +1,6 @@
 use prelude::*;
 use activate::{DeviceActivateKernel};
+use kernels::*;
 
 use cuda_dnn::v5::{CudnnTensorDesc, CudnnFilterDesc, CudnnConvDesc, CudnnAddOp, CudnnConvFwdOp, CudnnConvBwdFilterOp, CudnnConvBwdDataOp};
 use densearray::prelude::*;
@@ -19,6 +20,8 @@ use std::rc::{Rc};
 
 pub struct DeviceConv2dScaleKernel {
   pub dim:      (usize, usize, usize),
+  pub h_scale:  Array1d<f32>,
+  pub h_bias:   Array1d<f32>,
   pub scale:    DeviceArray1d<f32>,
   pub scale_g:  DeviceArray1d<f32>,
   pub bias:     DeviceArray1d<f32>,
@@ -27,30 +30,50 @@ pub struct DeviceConv2dScaleKernel {
 
 impl DeviceConv2dScaleKernel {
   pub fn new(dim: (usize, usize, usize), conn: DeviceConn) -> Self {
-    unimplemented!();
+    let chan = dim.2;
+    DeviceConv2dScaleKernel{
+      dim:          dim,
+      h_scale:      Array1d::zeros(chan),
+      h_bias:       Array1d::zeros(chan),
+      scale:        DeviceArray1d::zeros(chan, conn.clone()),
+      scale_g:      DeviceArray1d::zeros(chan, conn.clone()),
+      bias:         DeviceArray1d::zeros(chan, conn.clone()),
+      bias_g:       DeviceArray1d::zeros(chan, conn.clone()),
+    }
   }
 
   pub fn _forward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
-    // FIXME: wait.
+    in_buf.wait(&conn);
+    self.scale.as_view().wait(&conn);
+    self.bias.as_view().wait(&conn);
+    out_buf.wait(&conn);
     unsafe { neuralops_cuda_conv2d_scale_fwd(
         in_buf.as_ptr(),
-        dim.0 * dim.1,
-        dim.2,
+        self.dim.0 * self.dim.1,
+        self.dim.2,
         batch_size,
         self.scale.as_view().as_ptr(),
         self.bias.as_view().as_ptr(),
         out_buf.as_mut_ptr(),
         conn.raw_stream().ptr,
     ) };
-    // FIXME: post.
+    in_buf.post(&conn);
+    self.scale.as_view().post(&conn);
+    self.bias.as_view().post(&conn);
+    out_buf.post(&conn);
   }
 
-  pub fn _backward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, out_grad: DeviceMemRef<'a, f32>, mut in_grad: DeviceMemRef<'a, f32>, conn: DeviceConn) {
-    // FIXME: wait.
+  pub fn _backward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, out_grad: DeviceMemRef<'a, f32>, mut in_grad: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+    in_buf.wait(&conn);
+    out_grad.wait(&conn);
+    self.scale.as_view().wait(&conn);
+    self.scale_g.as_view().wait(&conn);
+    self.bias_g.as_view().wait(&conn);
+    in_grad.wait(&conn);
     unsafe { neuralops_cuda_conv2d_scale_bwd(
         in_buf.as_ptr(),
-        dim.0 * dim.1,
-        dim.2,
+        self.dim.0 * self.dim.1,
+        self.dim.2,
         batch_size,
         out_grad.as_ptr(),
         self.scale.as_view().as_ptr(),
@@ -59,7 +82,12 @@ impl DeviceConv2dScaleKernel {
         in_grad.as_mut_ptr(),
         conn.raw_stream().ptr,
     ) };
-    // FIXME: post.
+    in_buf.post(&conn);
+    out_grad.post(&conn);
+    self.scale.as_view().post(&conn);
+    self.scale_g.as_view().post(&conn);
+    self.bias_g.as_view().post(&conn);
+    in_grad.post(&conn);
   }
 }
 
@@ -79,40 +107,63 @@ pub struct DeviceConv2dBatchNormKernel {
 
 impl DeviceConv2dBatchNormKernel {
   pub fn new(dim: (usize, usize, usize), epsilon: f32, conn: DeviceConn) -> Self {
-    unimplemented!();
+    let chan = dim.2;
+    DeviceConv2dBatchNormKernel{
+      dim:          dim,
+      epsilon:      epsilon,
+      count:        0,
+      mean:         DeviceArray1d::zeros(chan, conn.clone()),
+      mean_g:       DeviceArray1d::zeros(chan, conn.clone()),
+      mean_acc:     DeviceArray1d::zeros(chan, conn.clone()),
+      run_mean:     DeviceArray1d::zeros(chan, conn.clone()),
+      var:          DeviceArray1d::zeros(chan, conn.clone()),
+      var_g:        DeviceArray1d::zeros(chan, conn.clone()),
+      var_acc:      DeviceArray1d::zeros(chan, conn.clone()),
+      run_var:      DeviceArray1d::zeros(chan, conn.clone()),
+    }
   }
 
   pub fn _forward_inference<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
-    // FIXME: wait.
+    in_buf.wait(&conn);
+    self.run_mean.as_view().wait(&conn);
+    self.run_var.as_view().wait(&conn);
+    out_buf.wait(&conn);
     unsafe { neuralops_cuda_conv2d_whiten_fwd(
         in_buf.as_ptr(),
-        dim.0 * dim.1,
-        dim.2,
+        self.dim.0 * self.dim.1,
+        self.dim.2,
         batch_size,
         self.run_mean.as_view().as_ptr(),
         self.run_var.as_view().as_ptr(),
+        self.epsilon,
         out_buf.as_mut_ptr(),
         conn.raw_stream().ptr,
     ) };
-    // FIXME: post.
+    in_buf.post(&conn);
+    self.run_mean.as_view().post(&conn);
+    self.run_var.as_view().post(&conn);
+    out_buf.post(&conn);
   }
 
   pub fn _forward_learning<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
-    // FIXME: wait.
     self.mean.as_view_mut().set_scalar(0.0, conn.clone());
     self.var.as_view_mut().set_scalar(0.0, conn.clone());
+    in_buf.wait(&conn);
+    self.mean.as_view().wait(&conn);
+    self.var.as_view().wait(&conn);
+    out_buf.wait(&conn);
     unsafe { neuralops_cuda_conv2d_mean_fwd(
         in_buf.as_ptr(),
-        dim.0 * dim.1,
-        dim.2,
+        self.dim.0 * self.dim.1,
+        self.dim.2,
         batch_size,
         self.mean.as_view_mut().as_mut_ptr(),
         conn.raw_stream().ptr,
     ) };
     unsafe { neuralops_cuda_conv2d_var_fwd(
         in_buf.as_ptr(),
-        dim.0 * dim.1,
-        dim.2,
+        self.dim.0 * self.dim.1,
+        self.dim.2,
         batch_size,
         self.mean.as_view().as_ptr(),
         self.var.as_view_mut().as_mut_ptr(),
@@ -120,8 +171,8 @@ impl DeviceConv2dBatchNormKernel {
     ) };
     unsafe { neuralops_cuda_conv2d_whiten_fwd(
         in_buf.as_ptr(),
-        dim.0 * dim.1,
-        dim.2,
+        self.dim.0 * self.dim.1,
+        self.dim.2,
         batch_size,
         self.mean.as_view().as_ptr(),
         self.var.as_view().as_ptr(),
@@ -130,16 +181,27 @@ impl DeviceConv2dBatchNormKernel {
         conn.raw_stream().ptr,
     ) };
     // FIXME: accumulate online mean/variance between batches.
-    self.count += 1;
-    // FIXME: post.
+    self.count += batch_size;
+    in_buf.post(&conn);
+    self.mean.as_view().post(&conn);
+    self.var.as_view().post(&conn);
+    out_buf.post(&conn);
   }
 
-  pub fn _backward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, out_grad: DeviceMemRef<'a, f32>, mut in_grad: DeviceMemRef<'a, f32>, conn: DeviceConn) {
-    // FIXME: wait.
+  pub fn _backward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, out_grad: DeviceMemRef<'a, f32>, mut in_grad: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+    self.mean_g.as_view_mut().set_scalar(0.0, conn.clone());
+    self.var_g.as_view_mut().set_scalar(0.0, conn.clone());
+    in_buf.wait(&conn);
+    out_grad.wait(&conn);
+    self.mean.as_view().wait(&conn);
+    self.var.as_view().wait(&conn);
+    self.mean_g.as_view().wait(&conn);
+    self.var_g.as_view().wait(&conn);
+    in_grad.wait(&conn);
     unsafe { neuralops_cuda_conv2d_batchnorm_bwd(
         in_buf.as_ptr(),
-        dim.0 * dim.1,
-        dim.2,
+        self.dim.0 * self.dim.1,
+        self.dim.2,
         batch_size,
         out_grad.as_ptr(),
         self.mean.as_view().as_ptr(),
@@ -150,7 +212,13 @@ impl DeviceConv2dBatchNormKernel {
         in_grad.as_mut_ptr(),
         conn.raw_stream().ptr,
     ) };
-    // FIXME: post.
+    in_buf.post(&conn);
+    out_grad.post(&conn);
+    self.mean.as_view().post(&conn);
+    self.var.as_view().post(&conn);
+    self.mean_g.as_view().post(&conn);
+    self.var_g.as_view().post(&conn);
+    in_grad.post(&conn);
   }
 
   pub fn _update(&mut self, avg_rate: f32, conn: DeviceConn) {
@@ -544,8 +612,8 @@ impl<S> DeviceBatchNormConv2dOperator<S> {
       fwd:      fwd,
       bwd_w:    bwd_w,
       bwd_d:    bwd_d,
-      bnorm_k:  DeviceConv2dBatchNormKernel::new(),
-      scale_k:  DeviceConv2dScaleKernel::new(),
+      bnorm_k:  DeviceConv2dBatchNormKernel::new(cfg.out_dim(), cfg.epsilon, stream.conn()),
+      scale_k:  DeviceConv2dScaleKernel::new(cfg.out_dim(), stream.conn()),
       act_kern: DeviceActivateKernel::new(cfg.out_dim().flat_len(), cfg.act_kind),
     }))
   }
@@ -629,41 +697,59 @@ impl<S> NewDiffOperator<S> for DeviceBatchNormConv2dOperator<S> {
     //self.hbias.as_view_mut().set_constant(0.0);
     self.weights.as_view_mut().load_sync(self.hweights.as_view(), self.stream.conn());
     //self.bias.as_view_mut().load_sync(self.hbias.as_view(), self.stream.conn());
+    self.bnorm_k.run_mean.as_view_mut().set_constant(0.0, self.stream.conn());
+    self.bnorm_k.run_var.as_view_mut().set_constant(1.0, self.stream.conn());
+    self.scale_k.scale.as_view_mut().set_constant(1.0, self.stream.conn());
+    self.scale_k.bias.as_view_mut().set_constant(0.0, self.stream.conn());
   }
 
   fn _load_diff_param(&mut self, init_offset: usize, param_reader: &mut [f32]) -> usize {
     let mut offset = init_offset;
     offset += param_reader.read_buf(offset, self.hweights.as_mut_slice());
+    offset += param_reader.read_buf(offset, self.scale_k.h_scale.as_mut_slice());
+    offset += param_reader.read_buf(offset, self.scale_k.h_bias.as_mut_slice());
     //offset += param_reader.read_buf(offset, self.hbias.as_mut_slice());
     self.weights.as_view_mut().load_sync(self.hweights.as_view(), self.stream.conn());
+    self.scale_k.scale.as_view_mut().load_sync(self.scale_k.h_scale.as_view(), self.stream.conn());
+    self.scale_k.bias.as_view_mut().load_sync(self.scale_k.h_bias.as_view(), self.stream.conn());
     //self.bias.as_view_mut().load_sync(self.hbias.as_view(), self.stream.conn());
     offset - init_offset
   }
 
   fn _store_diff_param(&mut self, init_offset: usize, param_writer: &mut [f32]) -> usize {
     self.weights.as_view().store_sync(self.hweights.as_view_mut(), self.stream.conn());
+    self.scale_k.scale.as_view().store_sync(self.scale_k.h_scale.as_view_mut(), self.stream.conn());
+    self.scale_k.bias.as_view().store_sync(self.scale_k.h_bias.as_view_mut(), self.stream.conn());
     //self.bias.as_view().store_sync(self.hbias.as_view_mut(), self.stream.conn());
     let mut offset = init_offset;
     offset += param_writer.write_buf(offset, self.hweights.as_slice());
+    offset += param_writer.write_buf(offset, self.scale_k.h_scale.as_slice());
+    offset += param_writer.write_buf(offset, self.scale_k.h_bias.as_slice());
     //offset += param_writer.write_buf(offset, self.hbias.as_slice());
     offset - init_offset
   }
 
   fn _store_grad(&mut self, init_offset: usize, grad_writer: &mut [f32]) -> usize {
     self.w_grad.as_view().store_sync(self.hweights.as_view_mut(), self.stream.conn());
+    self.scale_k.scale_g.as_view().store_sync(self.scale_k.h_scale.as_view_mut(), self.stream.conn());
+    self.scale_k.bias_g.as_view().store_sync(self.scale_k.h_bias.as_view_mut(), self.stream.conn());
     //self.b_grad.as_view().store_sync(self.hbias.as_view_mut(), self.stream.conn());
     let mut offset = init_offset;
     offset += grad_writer.write_buf(offset, self.hweights.as_slice());
+    offset += grad_writer.write_buf(offset, self.scale_k.h_scale.as_slice());
+    offset += grad_writer.write_buf(offset, self.scale_k.h_bias.as_slice());
     //offset += grad_writer.write_buf(offset, self.hbias.as_slice());
     offset - init_offset
   }
 
   fn _reset_grad(&mut self) {
     self.w_grad.as_view_mut().set_constant(0.0, self.stream.conn());
+    self.scale_k.scale_g.as_view_mut().set_constant(0.0, self.stream.conn());
+    self.scale_k.bias_g.as_view_mut().set_constant(0.0, self.stream.conn());
     //self.b_grad.as_view_mut().set_constant(0.0, self.stream.conn());
   }
 
-  fn _forward(&mut self, _phase: OpPhase) {
+  fn _forward(&mut self, phase: OpPhase) {
     let batch_size = self.in_.batch_sz.get();
     self.out.batch_sz.set(batch_size);
     assert!(batch_size <= self.cfg.batch_sz);
@@ -702,14 +788,25 @@ impl<S> NewDiffOperator<S> for DeviceBatchNormConv2dOperator<S> {
     self.scratch.as_ref().post(&self.stream.conn());
 
     let mut out_buf = self.out.buf.borrow_mut();
-    self.act_kern._forward(batch_size, self.t1_buf.as_ref(), out_buf.as_mut(), self.stream.conn());
+    match phase {
+      OpPhase::Inference => {
+        self.bnorm_k._forward_inference(batch_size, self.t1_buf.as_ref(), self.t2_buf.as_mut(), self.stream.conn());
+      }
+      OpPhase::Learning => {
+        self.bnorm_k._forward_learning(batch_size, self.t1_buf.as_ref(), self.t2_buf.as_mut(), self.stream.conn());
+      }
+    }
+    self.scale_k._forward(batch_size, self.t2_buf.as_ref(), self.t3_buf.as_mut(), self.stream.conn());
+    self.act_kern._forward(batch_size, self.t3_buf.as_ref(), out_buf.as_mut(), self.stream.conn());
   }
 
   fn _backward(&mut self) {
     let batch_size = self.out.batch_sz.get();
 
     let out_grad = self.out.grad.as_ref().unwrap().borrow();
-    self.act_kern._backward(batch_size, self.t1_buf.as_ref(), out_grad.as_ref(), self.t1_grad.as_mut(), self.stream.conn());
+    self.act_kern._backward(batch_size, self.t3_buf.as_ref(), out_grad.as_ref(), self.t3_grad.as_mut(), self.stream.conn());
+    self.scale_k._backward(batch_size, self.t2_buf.as_ref(), self.t3_grad.as_ref(), self.t2_grad.as_mut(), self.stream.conn());
+    self.bnorm_k._backward(batch_size, self.t1_buf.as_ref(), self.t2_grad.as_ref(), self.t1_grad.as_mut(), self.stream.conn());
 
     let in_buf = self.in_.buf.borrow();
     in_buf.as_ref().wait(&self.stream.conn());
@@ -760,6 +857,270 @@ impl<S> NewDiffOperator<S> for DeviceBatchNormConv2dOperator<S> {
       self.t1_grad.as_ref().post(&self.stream.conn());
       self.weights.as_view().post(&self.stream.conn());
       self.scratch.as_ref().post(&self.stream.conn());
+    }
+  }
+}
+
+pub struct DeviceResidualConv2dOperator<S> {
+  cfg:      ResidualConv2dOperatorConfig,
+  node:     OperatorNode,
+  stream:   DeviceStream,
+  join_op:  Rc<RefCell<DeviceAddJoinOperator<S>>>,
+  out:      DeviceOutput,
+  act_k:    DeviceActivateKernel,
+}
+
+impl<S> DeviceResidualConv2dOperator<S> where S: 'static {
+  pub fn new<InOp>(cfg: ResidualConv2dOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceResidualConv2dOperator<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
+    let split_cfg = SplitOperatorConfig{
+      batch_sz: cfg.batch_sz,
+      out_arms: 2,
+      dim:      cfg.in_dim.flat_len(),
+    };
+    let conv1_cfg = BatchNormConv2dOperatorConfig{
+      batch_sz: cfg.batch_sz,
+      in_dim:   cfg.in_dim,
+      kernel_w: 3,
+      kernel_h: 3,
+      stride_w: 1,
+      stride_h: 1,
+      pad_w:    1,
+      pad_h:    1,
+      out_chan: cfg.in_dim.2,
+      avg_rate: cfg.avg_rate,
+      epsilon:  cfg.epsilon,
+      act_kind: ActivationKind::Rect,
+      w_init:   cfg.w_init,
+    };
+    let conv2_cfg = BatchNormConv2dOperatorConfig{
+      batch_sz: cfg.batch_sz,
+      in_dim:   cfg.in_dim,
+      kernel_w: 3,
+      kernel_h: 3,
+      stride_w: 1,
+      stride_h: 1,
+      pad_w:    1,
+      pad_h:    1,
+      out_chan: cfg.in_dim.2,
+      avg_rate: cfg.avg_rate,
+      epsilon:  cfg.epsilon,
+      act_kind: ActivationKind::Identity,
+      w_init:   cfg.w_init,
+    };
+    let join_cfg = JoinOperatorConfig{
+      batch_sz: cfg.batch_sz,
+      in_arms:  2,
+      dim:      cfg.in_dim.flat_len(),
+    };
+    let split_op = DeviceCopySplitOperator::new(split_cfg, cap, prev_op, prev_arm, stream.clone());
+    let conv1_op = DeviceBatchNormConv2dOperator::new(conv1_cfg, cap, split_op.clone(), 0, stream.clone());
+    let conv2_op = DeviceBatchNormConv2dOperator::new(conv2_cfg, cap, conv1_op, 0, stream.clone());
+    let join_op = DeviceAddJoinOperator::new(join_cfg, cap, stream.clone());
+    join_op.borrow_mut().append_input(conv2_op, 0);
+    join_op.borrow_mut().append_input(split_op, 1);
+    Rc::new(RefCell::new(DeviceResidualConv2dOperator{
+      cfg:      cfg,
+      node:     OperatorNode::default(),
+      stream:   stream.clone(),
+      join_op:  join_op,
+      out:      DeviceOutput::new(cfg.batch_sz, cfg.in_dim.flat_len(), cap, stream.conn()),
+      act_k:    DeviceActivateKernel::new(cfg.in_dim.flat_len(), cfg.act_kind),
+    }))
+  }
+}
+
+impl<S> Operator for DeviceResidualConv2dOperator<S> {
+  fn _next(&self) -> u64 {
+    self.node._next()
+  }
+
+  fn _epoch(&self) -> u64 {
+    self.node._epoch()
+  }
+}
+
+impl<S> DeviceOperator for DeviceResidualConv2dOperator<S> {
+  fn _output(&self, arm: usize) -> DeviceOutput {
+    assert_eq!(0, arm);
+    self.out.clone()
+  }
+}
+
+impl<S> NewDiffOperator<S> for DeviceResidualConv2dOperator<S> {
+  type IoBuf = [f32];
+
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
+    self.node.step(epoch);
+    assert!(self.node.limit(1));
+    self.join_op.borrow_mut()._traverse_fwd(epoch, apply);
+    apply(self);
+  }
+
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
+    self.node.step(epoch);
+    assert!(self.node.limit(1));
+    apply(self);
+    self.join_op.borrow_mut()._traverse_bwd(epoch, apply);
+  }
+
+  fn _forward(&mut self, phase: OpPhase) {
+    let join_out = self.join_op.borrow()._output(0);
+    let batch_size = join_out.batch_sz.get();
+    self.out.batch_sz.set(batch_size);
+    let in_buf = join_out.buf.borrow();
+    let mut out_buf = self.out.buf.borrow_mut();
+    self.act_k._forward(batch_size, in_buf.as_ref(), out_buf.as_mut(), self.stream.conn());
+  }
+
+  fn _backward(&mut self) {
+    let join_out = self.join_op.borrow()._output(0);
+    if let Some(ref join_grad) = join_out.grad.as_ref() {
+      let batch_size = self.out.batch_sz.get();
+      let in_buf = join_out.buf.borrow();
+      let out_grad = self.out.grad.as_ref().unwrap().borrow();
+      let mut in_grad = join_grad.borrow_mut();
+      self.act_k._backward(batch_size, in_buf.as_ref(), out_grad.as_ref(), in_grad.as_mut(), self.stream.conn());
+    }
+  }
+}
+
+pub struct DeviceProjResidualConv2dOperator<S> {
+  cfg:      ProjResidualConv2dOperatorConfig,
+  node:     OperatorNode,
+  stream:   DeviceStream,
+  join_op:  Rc<RefCell<DeviceAddJoinOperator<S>>>,
+  out:      DeviceOutput,
+  act_k:    DeviceActivateKernel,
+}
+
+impl<S> DeviceProjResidualConv2dOperator<S> where S: 'static {
+  pub fn new<InOp>(cfg: ProjResidualConv2dOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceProjResidualConv2dOperator<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
+    let split_cfg = SplitOperatorConfig{
+      batch_sz: cfg.batch_sz,
+      out_arms: 2,
+      dim:      cfg.in_dim.flat_len(),
+    };
+    let conv1_cfg = BatchNormConv2dOperatorConfig{
+      batch_sz: cfg.batch_sz,
+      in_dim:   cfg.in_dim,
+      kernel_w: 3,
+      kernel_h: 3,
+      stride_w: cfg.stride_w,
+      stride_h: cfg.stride_h,
+      pad_w:    1,
+      pad_h:    1,
+      out_chan: cfg.out_chan,
+      avg_rate: cfg.avg_rate,
+      epsilon:  cfg.epsilon,
+      act_kind: ActivationKind::Rect,
+      w_init:   cfg.w_init,
+    };
+    let conv2_cfg = BatchNormConv2dOperatorConfig{
+      batch_sz: cfg.batch_sz,
+      in_dim:   cfg.out_dim(),
+      kernel_w: 3,
+      kernel_h: 3,
+      stride_w: 1,
+      stride_h: 1,
+      pad_w:    1,
+      pad_h:    1,
+      out_chan: cfg.out_chan,
+      avg_rate: cfg.avg_rate,
+      epsilon:  cfg.epsilon,
+      act_kind: ActivationKind::Identity,
+      w_init:   cfg.w_init,
+    };
+    let conv1x1_cfg = BatchNormConv2dOperatorConfig{
+      batch_sz: cfg.batch_sz,
+      in_dim:   cfg.in_dim,
+      kernel_w: 1,
+      kernel_h: 1,
+      stride_w: cfg.stride_w,
+      stride_h: cfg.stride_h,
+      pad_w:    0,
+      pad_h:    0,
+      out_chan: cfg.out_chan,
+      avg_rate: cfg.avg_rate,
+      epsilon:  cfg.epsilon,
+      act_kind: ActivationKind::Identity,
+      w_init:   cfg.w_init,
+    };
+    let join_cfg = JoinOperatorConfig{
+      batch_sz: cfg.batch_sz,
+      in_arms:  2,
+      dim:      cfg.out_dim().flat_len(),
+    };
+    let split_op = DeviceCopySplitOperator::new(split_cfg, cap, prev_op, prev_arm, stream.clone());
+    let conv1_op = DeviceBatchNormConv2dOperator::new(conv1_cfg, cap, split_op.clone(), 0, stream.clone());
+    let conv2_op = DeviceBatchNormConv2dOperator::new(conv2_cfg, cap, conv1_op, 0, stream.clone());
+    let conv1x1_op = DeviceBatchNormConv2dOperator::new(conv1x1_cfg, cap, split_op, 1, stream.clone());
+    let join_op = DeviceAddJoinOperator::new(join_cfg, cap, stream.clone());
+    join_op.borrow_mut().append_input(conv2_op, 0);
+    join_op.borrow_mut().append_input(conv1x1_op, 0);
+    Rc::new(RefCell::new(DeviceProjResidualConv2dOperator{
+      cfg:      cfg,
+      node:     OperatorNode::default(),
+      stream:   stream.clone(),
+      join_op:  join_op,
+      out:      DeviceOutput::new(cfg.batch_sz, cfg.out_dim().flat_len(), cap, stream.conn()),
+      act_k:    DeviceActivateKernel::new(cfg.out_dim().flat_len(), cfg.act_kind),
+    }))
+  }
+}
+
+impl<S> Operator for DeviceProjResidualConv2dOperator<S> {
+  fn _next(&self) -> u64 {
+    self.node._next()
+  }
+
+  fn _epoch(&self) -> u64 {
+    self.node._epoch()
+  }
+}
+
+impl<S> DeviceOperator for DeviceProjResidualConv2dOperator<S> {
+  fn _output(&self, arm: usize) -> DeviceOutput {
+    assert_eq!(0, arm);
+    self.out.clone()
+  }
+}
+
+impl<S> NewDiffOperator<S> for DeviceProjResidualConv2dOperator<S> {
+  type IoBuf = [f32];
+
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
+    self.node.step(epoch);
+    assert!(self.node.limit(1));
+    self.join_op.borrow_mut()._traverse_fwd(epoch, apply);
+    apply(self);
+  }
+
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
+    self.node.step(epoch);
+    assert!(self.node.limit(1));
+    apply(self);
+    self.join_op.borrow_mut()._traverse_bwd(epoch, apply);
+  }
+
+  fn _forward(&mut self, phase: OpPhase) {
+    let join_out = self.join_op.borrow()._output(0);
+    let batch_size = join_out.batch_sz.get();
+    self.out.batch_sz.set(batch_size);
+    let in_buf = join_out.buf.borrow();
+    let mut out_buf = self.out.buf.borrow_mut();
+    //self.act_k._forward(batch_size, &*join_out.buf.borrow(), &mut *self.out.buf.borrow_mut(), self.stream.conn());
+    self.act_k._forward(batch_size, in_buf.as_ref(), out_buf.as_mut(), self.stream.conn());
+  }
+
+  fn _backward(&mut self) {
+    let join_out = self.join_op.borrow()._output(0);
+    if let Some(ref join_grad) = join_out.grad.as_ref() {
+      let batch_size = self.out.batch_sz.get();
+      let in_buf = join_out.buf.borrow();
+      let out_grad = self.out.grad.as_ref().unwrap().borrow();
+      let mut in_grad = join_grad.borrow_mut();
+      //self.act_k._backward(batch_size, &*join_out.buf.borrow(), &*self.out.grad.as_ref().unwrap().borrow(), &mut *join_grad.borrow_mut(), self.stream.conn());
+      self.act_k._backward(batch_size, in_buf.as_ref(), out_grad.as_ref(), in_grad.as_mut(), self.stream.conn());
     }
   }
 }

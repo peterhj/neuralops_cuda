@@ -44,7 +44,7 @@ __global__ void conv_diag_affine_bwd_batch_kernel(
     int num_channels,
     int batch_size,
     const float *out_delta,
-    const float *__restrict__ scale,
+    const float *scale,
     float *scale_grad,
     float *bias_grad,
     float *in_delta)

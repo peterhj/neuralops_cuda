@@ -5,10 +5,13 @@ FC := gfortran-4.9
 
 LIBRARY_PATH := /opt/cudnn_v5.1/lib64:/usr/local/cuda/lib64
 
-.PHONY: all clean
+.PHONY: all debug clean
 
 all:
 	CC=$(CC) CXX=$(CXX) FC=$(FC) LIBRARY_PATH=$(LIBRARY_PATH) cargo build --release
+
+debug:
+	CC=$(CC) CXX=$(CXX) FC=$(FC) LIBRARY_PATH=$(LIBRARY_PATH) cargo build
 
 clean:
 	cargo clean

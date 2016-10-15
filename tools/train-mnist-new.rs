@@ -51,23 +51,29 @@ fn main() {
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   }, OpCapability::Backward, input, 0, stream.clone());*/
-  let conv1 = DeviceConv2dOperator::new(Conv2dOperatorConfig{
+  //let conv1 = DeviceConv2dOperator::new(Conv2dOperatorConfig{
+  let conv1 = DeviceBatchNormConv2dOperator::new(BatchNormConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (28, 28, 1),
     kernel_w:   5,  kernel_h:   5,
     stride_w:   2,  stride_h:   2,
     pad_w:      2,  pad_h:      2,
     out_chan:   16,
+    avg_rate:   0.05,
+    epsilon:    1.0e-6,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   }, OpCapability::Backward, input, 0, stream.clone());
-  let conv2 = DeviceConv2dOperator::new(Conv2dOperatorConfig{
+  //let conv2 = DeviceConv2dOperator::new(Conv2dOperatorConfig{
+  let conv2 = DeviceBatchNormConv2dOperator::new(BatchNormConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (14, 14, 16),
     kernel_w:   3,  kernel_h:   3,
     stride_w:   1,  stride_h:   1,
     pad_w:      1,  pad_h:      1,
     out_chan:   32,
+    avg_rate:   0.05,
+    epsilon:    1.0e-6,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   }, OpCapability::Backward, conv1, 0, stream.clone());

@@ -151,7 +151,7 @@ impl<S> NewDiffOperator<S> for DeviceVarInputOperator<S> where S: SampleDatum<[f
         }
         &VarInputPreproc::RandomResize2d{lo, hi, ref phases} => {
           if phases.contains(&phase) {
-            let mut out_buf = self.out.buf.borrow_mut();
+            //let mut out_buf = self.out.buf.borrow_mut();
             for idx in 0 .. batch_size {
               let in_dim = self.tmp_dims[idx];
               let resized_out_d = self.rng.gen_range(lo, hi+1);
@@ -184,7 +184,7 @@ impl<S> NewDiffOperator<S> for DeviceVarInputOperator<S> where S: SampleDatum<[f
         }
         &VarInputPreproc::RandomCrop2d{crop_w, crop_h, pad_w, pad_h, ref phases} => {
           if phases.contains(&phase) {
-            let mut out_buf = self.out.buf.borrow_mut();
+            //let mut out_buf = self.out.buf.borrow_mut();
             for idx in 0 .. batch_size {
               let in_dim = self.tmp_dims[idx];
               assert!(crop_w <= in_dim.0 + 2 * pad_w);
