@@ -24,6 +24,7 @@ pub struct DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel {
   out:      DeviceOutput,
   batch_nr: Option<usize>,
   losses:   DeviceMem<f32>,
+  probs:    DeviceMem<f32>,
   hats:     DeviceMem<u32>,
   acc_loss: f32,
   reg_loss: f32,
@@ -31,36 +32,53 @@ pub struct DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel {
   labels:   DeviceMem<u32>,
   weights:  DeviceMem<f32>,
   targets:  DeviceMem<f32>,
+  labels_h: Vec<u32>,
+  ws_h:     Vec<f32>,
+  ts_h:     Vec<f32>,
+  hats_h:   Vec<u32>,
+  losses_h: Vec<f32>,
   softmax:  DeviceSoftmaxKernel,
 }
 
 impl<S> DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel {
   pub fn new<InOp>(cfg: ClassLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, conn: DeviceConn) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
-    let mut hats = Vec::with_capacity(cfg.batch_sz);
-    hats.resize(cfg.batch_sz, 0);
-    let mut losses = Vec::with_capacity(cfg.batch_sz);
-    losses.resize(cfg.batch_sz, 0.0);
-    let mut labels = Vec::with_capacity(cfg.batch_sz);
-    labels.resize(cfg.batch_sz, 0);
-    let mut weights = Vec::with_capacity(cfg.batch_sz);
-    weights.resize(cfg.batch_sz, 1.0);
     let in_ = prev_op.borrow()._output(prev_arm);
+    let mut weights = DeviceMem::zeros(cfg.batch_sz, conn.clone());
+    weights.as_mut().set_constant(1.0, conn.clone());
+    let mut targets = DeviceMem::zeros(cfg.batch_sz, conn.clone());
+    targets.as_mut().set_constant(1.0, conn.clone());
+    let mut labels_h = Vec::with_capacity(cfg.batch_sz);
+    labels_h.resize(cfg.batch_sz, 0);
+    let mut ws_h = Vec::with_capacity(cfg.batch_sz);
+    ws_h.resize(cfg.batch_sz, 1.0);
+    let mut ts_h = Vec::with_capacity(cfg.batch_sz);
+    ts_h.resize(cfg.batch_sz, 1.0);
+    let mut hats_h = Vec::with_capacity(cfg.batch_sz);
+    hats_h.resize(cfg.batch_sz, 0);
+    let mut losses_h = Vec::with_capacity(cfg.batch_sz);
+    losses_h.resize(cfg.batch_sz, 0.0);
     Rc::new(RefCell::new(DeviceSoftmaxNLLClassLoss{
       cfg:      cfg,
       node:     OperatorNode::default(),
       conn:     conn.clone(),
       in_op:    prev_op,
       in_:      in_,
-      out:      DeviceOutput::new(cfg.batch_sz, cfg.num_classes, cap, conn.clone()),
+      out:      DeviceOutput::new(cfg.batch_sz, 1, cap, conn.clone()),
       batch_nr: None,
       losses:   DeviceMem::zeros(cfg.batch_sz, conn.clone()),
+      probs:    DeviceMem::zeros(cfg.batch_sz * cfg.num_classes, conn.clone()),
       hats:     DeviceMem::zeros(cfg.batch_sz, conn.clone()),
       acc_loss: 0.0,
       reg_loss: 0.0,
       accuracy: 0,
       labels:   DeviceMem::zeros(cfg.batch_sz, conn.clone()),
-      weights:  DeviceMem::zeros(cfg.batch_sz, conn.clone()),
-      targets:  DeviceMem::zeros(cfg.batch_sz, conn.clone()),
+      weights:  weights,
+      targets:  targets,
+      labels_h: labels_h,
+      ws_h:     ws_h,
+      ts_h:     ts_h,
+      hats_h:   hats_h,
+      losses_h: losses_h,
       softmax:  DeviceSoftmaxKernel::new(cfg.batch_sz, cfg.num_classes, conn),
     }))
   }
@@ -120,18 +138,18 @@ impl<S> NewDiffOperator<S> for DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel
     let actual_batch_size = samples.len();
     assert!(actual_batch_size <= self.cfg.batch_sz);
     for (idx, sample) in samples.iter().enumerate() {
-      // FIXME(20161014)
       if let Some(cat) = sample.class() {
         assert!(cat < self.cfg.num_classes as u32);
         assert!(cat != u32::MAX);
-        //self.labels[idx] = cat;
+        self.labels_h[idx] = cat;
       } else {
-        //self.labels[idx] = u32::MAX;
+        self.labels_h[idx] = u32::MAX;
       }
       // FIXME(20161013): sample trait bounds.
       //self.weights[idx] = 1.0;
       //self.weights[idx] = sample.weight().unwrap_or(1.0);
     }
+    self.labels.as_mut().load_sync(&self.labels_h, self.conn.clone());
     self.out.batch_sz.set(actual_batch_size);
     self.batch_nr = Some(self.batch_nr.map_or(0, |batch| batch + 1));
   }
@@ -140,75 +158,47 @@ impl<S> NewDiffOperator<S> for DeviceSoftmaxNLLClassLoss<S> where S: SampleLabel
     let batch_size = self.in_.batch_sz.get();
     assert_eq!(batch_size, self.out.batch_sz.get());
 
-    // FIXME
-
-    /*let in_buf = self.in_.buf.borrow();
+    let in_buf = self.in_.buf.borrow();
     let mut out_buf = self.out.buf.borrow_mut();
-    for idx in 0 .. batch_size {
-      let range = idx * self.cfg.num_classes .. (idx+1) * self.cfg.num_classes;
-      let max_logit_k = argmax(in_buf[range.clone()].iter().map(|&x| F32InfNan(x))).unwrap();
-      let max_logit = in_buf[idx * self.cfg.num_classes + max_logit_k];
-      self.max_log[idx] = max_logit;
-      self.hats[idx] = max_logit_k as u32;
-      for k in 0 .. self.cfg.num_classes {
-        self.facts[idx * self.cfg.num_classes + k] = (in_buf[idx * self.cfg.num_classes + k] - max_logit).exp();
-      }
-      let sum_fact: f32 = Sum::sum(self.facts[range].iter().map(|&x| x));
-      for k in 0 .. self.cfg.num_classes {
-        out_buf[idx * self.cfg.num_classes + k] = self.facts[idx * self.cfg.num_classes + k] / sum_fact;
-      }
-      self.losses[idx] = -self.weights[idx] * out_buf[idx * self.cfg.num_classes + self.labels[idx] as usize].ln();
-    }
+    self.softmax._forward(
+        batch_size,
+        in_buf.as_ref(),
+        self.labels.as_ref(),
+        self.weights.as_ref(),
+        self.targets.as_ref(),
+        self.hats.as_mut(),
+        self.probs.as_mut(),
+        out_buf.as_mut(),
+        self.conn.clone(),
+    );
 
+    out_buf.as_ref().store_sync(&mut self.losses_h, self.conn.clone());
+    self.hats.as_ref().store_sync(&mut self.hats_h, self.conn.clone());
     let mut batch_loss = 0.0;
     let mut batch_accuracy = 0;
     for idx in 0 .. batch_size {
-      let idx_range = idx * self.cfg.num_classes .. (idx+1) * self.cfg.num_classes;
-      let max_logit_k = argmax(in_buf[idx_range.clone()].iter().map(|&x| F32InfNan(x))).unwrap();
-      self.hats[idx] = max_logit_k as u32;
-      if self.hats[idx] == self.labels[idx] {
+      batch_loss += self.losses_h[idx];
+      if self.hats_h[idx] == self.labels_h[idx] {
         batch_accuracy += 1;
       }
-      let loss = if self.labels[idx] == u32::MAX {
-        0.0
-      } else {
-        -self.weights[idx] * out_buf[idx * self.cfg.num_classes + self.labels[idx] as usize].ln()
-      };
-      self.losses[idx] = loss;
-      batch_loss += loss;
     }
     self.acc_loss += batch_loss;
     self.accuracy += batch_accuracy;
-
-    if let Some(0) = self.batch_nr {
-      let mut reg_loss = 0.0;
-      // FIXME(20161013): L2 reg.
-      /*for block in self.blocks.iter() {
-        let block_out = block.borrow()._output(0);
-        reg_loss += block_out.buf.borrow()[0];
-      }*/
-      self.reg_loss = reg_loss;
-    }*/
   }
 
   fn _backward(&mut self) {
     let batch_size = self.out.batch_sz.get();
     if let Some(ref in_grad) = self.in_.grad.as_ref() {
-      let out_buf = self.out.buf.borrow();
       let mut in_grad = in_grad.borrow_mut();
-
-      // FIXME
-      //self.softmax.backward();
-
-      /*let mut p = 0;
-      for idx in 0 .. batch_size {
-        for k in 0 .. self.cfg.num_classes {
-          in_grad[p] =
-              self.weights[idx] *
-              (out_buf[p] - if k == self.labels[idx] as usize { 1.0 } else { 0.0 });
-          p += 1;
-        }
-      }*/
+      self.softmax._backward(
+          batch_size,
+          self.probs.as_ref(),
+          self.labels.as_ref(),
+          self.weights.as_ref(),
+          self.targets.as_ref(),
+          in_grad.as_mut(),
+          self.conn.clone(),
+      );
     }
   }
 }

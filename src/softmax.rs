@@ -26,12 +26,12 @@ impl DeviceSoftmaxKernel {
     }
   }
 
-  pub fn _forward<'a>(&mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, targets: DeviceMemRef<'a, f32>, mut hats: DeviceMemRefMut<'a, u32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+  pub fn _forward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, targets: DeviceMemRef<'a, f32>, mut hats: DeviceMemRefMut<'a, u32>, mut probs: DeviceMemRefMut<'a, f32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
     assert!(batch_size <= self.batch_sz);
     assert!(self.in_dim <= 1024);
 
     // FIXME: copy only `batch_size * self.in_dim` amount.
-    self.logit.as_mut().copy(in_buf.clone(), conn.clone());
+    self.logit.as_mut().slice_mut(0, batch_size * self.in_dim).copy(in_buf.clone().slice(0, batch_size * self.in_dim), conn.clone());
 
     in_buf.wait(&conn);
     labels.wait(&conn);
@@ -73,7 +73,7 @@ impl DeviceSoftmaxKernel {
     out_buf.wait(&conn);
 
     unsafe { neuralops_cuda_blockreduce_sum(
-        self.logit.as_ref().as_ptr(),
+        self.factor.as_ref().as_ptr(),
         self.in_dim,
         batch_size,
         0.0,
@@ -103,9 +103,11 @@ impl DeviceSoftmaxKernel {
     weights.post(&conn);
     targets.post(&conn);
     out_buf.post(&conn);
+
+    probs.slice_mut(0, batch_size * self.in_dim).copy(self.factor.as_ref().slice(0, batch_size * self.in_dim), conn.clone());
   }
 
-  pub fn _backward<'a>(&self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, targets: DeviceMemRef<'a, f32>, mut in_grad: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+  pub fn _backward<'a>(&'a self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, targets: DeviceMemRef<'a, f32>, mut in_grad: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
     assert!(batch_size <= self.batch_sz);
 
     in_buf.wait(&conn);

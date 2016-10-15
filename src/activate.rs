@@ -19,35 +19,35 @@ impl DeviceActivateKernel {
   }
 
   pub fn _forward<'a>(&self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
-    in_buf.wait(&conn);
-    out_buf.wait(&conn);
     match self.act_kind {
       ActivationKind::Identity => {
         out_buf.copy(in_buf.clone(), conn.clone());
       }
       ActivationKind::Rect => {
+        in_buf.wait(&conn);
+        out_buf.wait(&conn);
         unsafe { neuralops_cuda_activate_rect_fwd(
             in_buf.as_ptr(),
             batch_size * self.out_dim,
             out_buf.as_mut_ptr(),
             conn.stream().ptr,
         ) };
+        in_buf.post(&conn);
+        out_buf.post(&conn);
       }
       _ => unimplemented!(),
     }
-    in_buf.post(&conn);
-    out_buf.post(&conn);
   }
 
   pub fn _backward<'a>(&self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, out_grad: DeviceMemRef<'a, f32>, mut in_grad: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
-    in_buf.wait(&conn);
-    out_grad.wait(&conn);
-    in_grad.wait(&conn);
     match self.act_kind {
       ActivationKind::Identity => {
         in_grad.copy(out_grad.clone(), conn.clone());
       }
       ActivationKind::Rect => {
+        in_buf.wait(&conn);
+        out_grad.wait(&conn);
+        in_grad.wait(&conn);
         unsafe { neuralops_cuda_activate_rect_bwd(
             in_buf.as_ptr(),
             batch_size * self.out_dim,
@@ -55,11 +55,11 @@ impl DeviceActivateKernel {
             in_grad.as_mut_ptr(),
             conn.stream().ptr,
         ) };
+        in_buf.post(&conn);
+        out_grad.post(&conn);
+        in_grad.post(&conn);
       }
       _ => unimplemented!(),
     }
-    in_buf.post(&conn);
-    out_grad.post(&conn);
-    in_grad.post(&conn);
   }
 }

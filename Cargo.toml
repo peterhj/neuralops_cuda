@@ -12,9 +12,13 @@ build = "build.rs"
 name = "neuralops_cuda"
 path = "src/lib.rs"
 
-#[[bin]]
-#name = "train-mnist-new"
-#path = "tools/train-mnist-new.rs"
+[[bin]]
+name = "train-mnist-cpu"
+path = "tools/train-mnist-cpu.rs"
+
+[[bin]]
+name = "train-mnist-new"
+path = "tools/train-mnist-new.rs"
 
 #[[bin]]
 #name = "train-cifar10-new"
