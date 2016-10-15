@@ -742,6 +742,14 @@ impl<S> NewDiffOperator<S> for DeviceBatchNormConv2dOperator<S> {
     offset - init_offset
   }
 
+  fn _update_nondiff_param(&mut self, iter: usize) {
+    if iter == 0 {
+      self.bnorm_k._update(1.0, self.stream.conn());
+    } else {
+      self.bnorm_k._update(self.cfg.avg_rate, self.stream.conn());
+    }
+  }
+
   fn _reset_grad(&mut self) {
     self.w_grad.as_view_mut().set_constant(0.0, self.stream.conn());
     self.scale_k.scale_g.as_view_mut().set_constant(0.0, self.stream.conn());

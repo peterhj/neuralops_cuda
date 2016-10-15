@@ -9,6 +9,7 @@ use devicemem_cuda::prelude::*;
 use neuralops::prelude::*;
 use neuralops::data::{CyclicDataIter, RandomSampleDataIter};
 use neuralops::data::cifar::{CifarFlavor, CifarDataShard};
+//use neuralops::archs::*;
 use neuralops_cuda::archs::*;
 use operator::prelude::*;
 use operator::opt::sgd_new::{SgdConfig, SgdWorker};
@@ -34,6 +35,7 @@ fn main() {
       ));
 
   let stream = DeviceStream::new(0);
+  //let loss = build_cifar10_resnet20_loss(batch_sz);
   let loss = build_cifar10_resnet20_loss(batch_sz, stream);
 
   let sgd_cfg = SgdConfig{
@@ -54,7 +56,7 @@ fn main() {
       println!("DEBUG: iter: {} accuracy: {:.3} stats: {:?}", iter_nr + 1, sgd.get_opt_stats().accuracy(), sgd.get_opt_stats());
       sgd.reset_opt_stats();
     }
-    if (iter_nr + 1) % 100 == 0 {
+    if (iter_nr + 1) % 500 == 0 {
       println!("DEBUG: validating...");
       sgd.reset_opt_stats();
       sgd.eval(valid_data.len(), &mut valid_data);

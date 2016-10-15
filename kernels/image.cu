@@ -20,7 +20,7 @@ __global__ void image2d_crop(
   if (idx < n) {
     int x = u + x_offset;
     int y = v + y_offset;
-    if ((x >= 0) && (x < crop_width) && (y >= 0) && (y < crop_height) && (c < channels)) {
+    if ((x >= 0) && (x < in_width) && (y >= 0) && (y < in_height) && (c < channels)) {
       int in_idx = x + y * in_width + c * in_width * in_height;
       out_pixels[idx] = in_pixels[in_idx];
     } else {
