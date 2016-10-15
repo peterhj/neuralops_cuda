@@ -18,14 +18,18 @@ __global__ void batch_blockreduce_argmax_kernel(
   if (tid < len && block < batch_size) {
     cache[OFFSET_BANK(tid)]     = xs[i];
     cache_idx[OFFSET_BANK(tid)] = tid;
-    __syncthreads();
-    for (int s = 1; s < blockDim.x; s *= 2) {
+  }
+  __syncthreads();
+  for (int s = 1; s < blockDim.x; s *= 2) {
+    if (tid < len && block < batch_size) {
       if (tid % (2*s) == 0 && (tid + s) < len && cache[OFFSET_BANK(tid)] < cache[OFFSET_BANK(tid + s)]) {
         cache[OFFSET_BANK(tid)]     = cache[OFFSET_BANK(tid + s)];
         cache_idx[OFFSET_BANK(tid)] = cache_idx[OFFSET_BANK(tid + s)];
       }
-      __syncthreads();
     }
+    __syncthreads();
+  }
+  if (tid < len && block < batch_size) {
     if (tid == 0) {
       x_max_block[block] = cache[0];
       if (x_argmax_block != NULL) {
@@ -63,13 +67,17 @@ __global__ void batch_blockreduce_sum_kernel(
   int i = tid + block * len;
   if (tid < len && block < batch_size) {
     cache[OFFSET_BANK(tid)] = xs[i];
-    __syncthreads();
-    for (int s = 1; s < blockDim.x; s *= 2) {
+  }
+  __syncthreads();
+  for (int s = 1; s < blockDim.x; s *= 2) {
+    if (tid < len && block < batch_size) {
       if (tid % (2*s) == 0 && (tid + s) < len) {
         cache[OFFSET_BANK(tid)] += cache[OFFSET_BANK(tid + s)];
       }
-      __syncthreads();
     }
+    __syncthreads();
+  }
+  if (tid < len && block < batch_size) {
     if (tid == 0) {
       if (alpha != 0.0f) {
         float xs_sum_0 = xs_sum[block];
