@@ -13,23 +13,23 @@ use std::rc::{Rc};
 pub struct DeviceAddJoinOperator<S> {
   cfg:      JoinOperatorConfig,
   node:     OperatorNode,
-  conn:     DeviceConn,
+  stream:   DeviceStream,
   in_ops:   Vec<Rc<RefCell<NewDiffOperator<S, IoBuf=[f32]>>>>,
   in_:      Vec<DeviceOutput>,
   out:      DeviceOutput,
 }
 
 impl<S> DeviceAddJoinOperator<S> {
-  pub fn new(cfg: JoinOperatorConfig, cap: OpCapability, conn: DeviceConn) -> Rc<RefCell<DeviceAddJoinOperator<S>>> {
+  pub fn new(cfg: JoinOperatorConfig, cap: OpCapability, stream: DeviceStream) -> Rc<RefCell<DeviceAddJoinOperator<S>>> {
     let mut in_ops = Vec::with_capacity(cfg.in_arms);
     let mut in_ = Vec::with_capacity(cfg.in_arms);
     Rc::new(RefCell::new(DeviceAddJoinOperator{
       cfg:      cfg,
       node:     OperatorNode::default(),
-      conn:     conn.clone(),
+      stream:   stream.clone(),
       in_ops:   in_ops,
       in_:      in_,
-      out:      DeviceOutput::new(cfg.batch_sz, cfg.dim, cap, conn),
+      out:      DeviceOutput::new(cfg.batch_sz, cfg.dim, cap, stream.conn()),
     }))
   }
 
@@ -88,14 +88,14 @@ impl<S> NewDiffOperator<S> for DeviceAddJoinOperator<S> {
     {
       let in_buf = self.in_[0].buf.borrow();
       out_buf.as_mut().slice_mut(0, batch_size * self.cfg.dim)
-        .copy(in_buf.as_ref().slice(0, batch_size * self.cfg.dim), self.conn.clone());
+        .copy(in_buf.as_ref().slice(0, batch_size * self.cfg.dim), self.stream.conn());
     }
     for arm in 1 .. self.cfg.in_arms {
       let arm_batch_size = self.in_[arm].batch_sz.get();
       assert_eq!(batch_size, arm_batch_size);
       let in_buf = self.in_[arm].buf.borrow();
       out_buf.as_mut().reshape_mut(batch_size * self.cfg.dim)
-        .add(1.0, in_buf.as_ref().reshape(batch_size * self.cfg.dim), 1.0, self.conn.clone());
+        .add(1.0, in_buf.as_ref().reshape(batch_size * self.cfg.dim), 1.0, self.stream.conn());
     }
   }
 
@@ -106,7 +106,7 @@ impl<S> NewDiffOperator<S> for DeviceAddJoinOperator<S> {
         let out_grad = self.out.grad.as_ref().unwrap().borrow();
         let mut in_grad = in_grad.borrow_mut();
         in_grad.as_mut().slice_mut(0, batch_size * self.cfg.dim)
-          .copy(out_grad.as_ref().slice(0, batch_size * self.cfg.dim), self.conn.clone());
+          .copy(out_grad.as_ref().slice(0, batch_size * self.cfg.dim), self.stream.conn());
       }
     }
   }

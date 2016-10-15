@@ -13,23 +13,23 @@ use std::rc::{Rc};
 pub struct DeviceCopySplitOperator<S> {
   cfg:      SplitOperatorConfig,
   node:     OperatorNode,
-  conn:     DeviceConn,
+  stream:   DeviceStream,
   in_op:    Rc<RefCell<NewDiffOperator<S, IoBuf=[f32]>>>,
   in_:      DeviceOutput,
   out:      Vec<DeviceOutput>,
 }
 
 impl<S> DeviceCopySplitOperator<S> {
-  pub fn new<InOp>(cfg: SplitOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, conn: DeviceConn) -> Rc<RefCell<DeviceCopySplitOperator<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
+  pub fn new<InOp>(cfg: SplitOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceCopySplitOperator<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
     let prev_out = prev_op.borrow()._output(prev_arm);
     let mut out = Vec::with_capacity(cfg.out_arms);
     for arm in 0 .. cfg.out_arms {
-      out.push(DeviceOutput::new(cfg.batch_sz, cfg.dim, cap, conn.clone()));
+      out.push(DeviceOutput::new(cfg.batch_sz, cfg.dim, cap, stream.conn()));
     }
     Rc::new(RefCell::new(DeviceCopySplitOperator{
       cfg:      cfg,
       node:     OperatorNode::default(),
-      conn:     conn,
+      stream:   stream,
       in_op:    prev_op,
       in_:      prev_out,
       out:      out,
@@ -82,7 +82,7 @@ impl<S> NewDiffOperator<S> for DeviceCopySplitOperator<S> {
       let in_buf = self.in_.buf.borrow();
       let mut out_buf = self.out[arm].buf.borrow_mut();
       out_buf.as_mut().slice_mut(0, batch_size * self.cfg.dim)
-        .copy(in_buf.as_ref().slice(0, batch_size * self.cfg.dim), self.conn.clone());
+        .copy(in_buf.as_ref().slice(0, batch_size * self.cfg.dim), self.stream.conn());
     }
   }
 
@@ -93,14 +93,14 @@ impl<S> NewDiffOperator<S> for DeviceCopySplitOperator<S> {
       {
         let out_grad = self.out[0].grad.as_ref().unwrap().borrow();
         in_grad.as_mut().slice_mut(0, batch_size * self.cfg.dim)
-          .copy(out_grad.as_ref().slice(0, batch_size * self.cfg.dim), self.conn.clone());
+          .copy(out_grad.as_ref().slice(0, batch_size * self.cfg.dim), self.stream.conn());
       }
       for arm in 1 .. self.cfg.out_arms {
         let arm_batch_size = self.out[arm].batch_sz.get();
         assert_eq!(batch_size, arm_batch_size);
         let out_grad = self.out[arm].grad.as_ref().unwrap().borrow();
         in_grad.as_mut().reshape_mut(batch_size * self.cfg.dim)
-          .add(1.0, out_grad.as_ref().reshape(batch_size * self.cfg.dim), 1.0, self.conn.clone());
+          .add(1.0, out_grad.as_ref().reshape(batch_size * self.cfg.dim), 1.0, self.stream.conn());
       }
     }
   }

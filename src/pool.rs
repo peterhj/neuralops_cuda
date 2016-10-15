@@ -16,7 +16,7 @@ use std::rc::{Rc};
 pub struct DevicePool2dOperator<S> {
   cfg:      Pool2dOperatorConfig,
   node:     OperatorNode,
-  conn:     DeviceConn,
+  stream:   DeviceStream,
   in_op:    Rc<RefCell<NewDiffOperator<S, IoBuf=[f32]>>>,
   in_:      DeviceOutput,
   out:      DeviceOutput,
@@ -24,7 +24,7 @@ pub struct DevicePool2dOperator<S> {
 }
 
 impl<S> DevicePool2dOperator<S> {
-  pub fn new<InOp>(cfg: Pool2dOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, conn: DeviceConn) -> Rc<RefCell<DevicePool2dOperator<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
+  pub fn new<InOp>(cfg: Pool2dOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DevicePool2dOperator<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
     let in_ = prev_op.borrow()._output(prev_arm);
     let (in_w, in_h, chan) = cfg.in_dim;
     let (out_w, out_h, _) = cfg.out_dim();
@@ -47,10 +47,10 @@ impl<S> DevicePool2dOperator<S> {
     Rc::new(RefCell::new(DevicePool2dOperator{
       cfg:      cfg,
       node:     OperatorNode::default(),
-      conn:     conn.clone(),
+      stream:   stream.clone(),
       in_op:    prev_op,
       in_:      in_,
-      out:      DeviceOutput::new(cfg.batch_sz, cfg.out_dim().flat_len(), cap, conn),
+      out:      DeviceOutput::new(cfg.batch_sz, cfg.out_dim().flat_len(), cap, stream.conn()),
       pooling:  pooling,
     }))
   }
@@ -96,16 +96,16 @@ impl<S> NewDiffOperator<S> for DevicePool2dOperator<S> {
     assert!(batch_size <= self.cfg.batch_sz);
     let in_buf = self.in_.buf.borrow();
     let mut out_buf = self.out.buf.borrow_mut();
-    in_buf.as_ref().wait(&self.conn);
-    out_buf.as_ref().wait(&self.conn);
+    in_buf.as_ref().wait(&self.stream.conn());
+    out_buf.as_ref().wait(&self.stream.conn());
     self.pooling.set_batch_size(batch_size).unwrap();
     unsafe { self.pooling.forward(
         in_buf.as_ptr(),
         out_buf.as_mut_ptr(),
-        &*self.conn.cudnn(),
+        &*self.stream.conn().cudnn(),
     ) }.unwrap();
-    in_buf.as_ref().post(&self.conn);
-    out_buf.as_ref().post(&self.conn);
+    in_buf.as_ref().post(&self.stream.conn());
+    out_buf.as_ref().post(&self.stream.conn());
   }
 
   fn _backward(&mut self) {
@@ -115,22 +115,22 @@ impl<S> NewDiffOperator<S> for DevicePool2dOperator<S> {
       let out_buf = self.out.buf.borrow();
       let out_grad = self.out.grad.as_ref().unwrap().borrow();
       let mut in_grad = in_grad.borrow_mut();
-      in_buf.as_ref().wait(&self.conn);
-      out_buf.as_ref().wait(&self.conn);
-      out_grad.as_ref().wait(&self.conn);
-      in_grad.as_ref().wait(&self.conn);
+      in_buf.as_ref().wait(&self.stream.conn());
+      out_buf.as_ref().wait(&self.stream.conn());
+      out_grad.as_ref().wait(&self.stream.conn());
+      in_grad.as_ref().wait(&self.stream.conn());
       self.pooling.set_batch_size(batch_size).unwrap();
       unsafe { self.pooling.backward(
           in_buf.as_ref().as_ptr(),
           out_buf.as_ref().as_ptr(),
           out_grad.as_ref().as_ptr(),
           in_grad.as_mut().as_mut_ptr(),
-          &*self.conn.cudnn(),
+          &*self.stream.conn().cudnn(),
       ) }.unwrap();
-      in_buf.as_ref().post(&self.conn);
-      out_buf.as_ref().post(&self.conn);
-      out_grad.as_ref().post(&self.conn);
-      in_grad.as_ref().post(&self.conn);
+      in_buf.as_ref().post(&self.stream.conn());
+      out_buf.as_ref().post(&self.stream.conn());
+      out_grad.as_ref().post(&self.stream.conn());
+      in_grad.as_ref().post(&self.stream.conn());
     }
   }
 }
