@@ -6,6 +6,9 @@ use std::rc::{Rc};
 
 pub trait DeviceOperator {
   fn _output(&self, arm: usize) -> DeviceOutput;
+  fn _dev_load_diff_param<'a>(&mut self, init_offset: usize, param_reader: &mut DeviceMemRefMut<'a, f32>) -> usize { 0 }
+  fn _dev_store_diff_param<'a>(&mut self, init_offset: usize, param_writer: &mut DeviceMemRefMut<'a, f32>) -> usize { 0 }
+  fn _dev_store_grad<'a>(&mut self, init_offset: usize, grad_writer: &mut DeviceMemRefMut<'a, f32>) -> usize { 0 }
 }
 
 #[derive(Clone)]

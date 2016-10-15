@@ -32,4 +32,22 @@ extern "C" {
       out_pixels: *mut f32,
       out_width: size_t, out_height: size_t,
       stream: cudaStream_t);
+  pub fn neuralops_cuda_softmax_nll_loss_fwd(
+      in_buf: *const f32,
+      num_classes: size_t,
+      batch_size: size_t,
+      labels: *const u32,
+      weights: *const f32,
+      targets: *const f32,
+      out_buf: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_softmax_nll_loss_bwd(
+      in_buf: *const f32,
+      num_classes: size_t,
+      batch_size: size_t,
+      labels: *const u32,
+      weights: *const f32,
+      targets: *const f32,
+      in_delta: *mut f32,
+      stream: cudaStream_t);
 }

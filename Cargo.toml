@@ -32,7 +32,7 @@ cuda = { path = "../libcuda" }
 cuda_dnn = { path = "../libcuda_dnn" }
 densearray = { path = "../libdensearray" }
 devicemem_cuda = { path = "../libdevicemem_cuda" }
-#iter_utils = { path = "../libiter_utils" }
+iter_utils = { path = "../libiter_utils" }
 #mkl_dnn = { path = "../libmkl_dnn", optional = true }
 #nnpack = { path = "../libnnpack", optional = true }
 neuralops = { path = "../neuralops" }
