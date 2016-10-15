@@ -7,8 +7,9 @@ fn main() {
     // FIXME(20151207): for working w/ K80.
     //.flag("-arch=sm_37")
     .flag("-arch=sm_52")
-    .flag("-Xcompiler")
-    .flag("\'-fPIC\'")
+    /*.flag("-Xcompiler")
+    .flag("\'-fPIC\'")*/
+    .pic(true)
     .include("/usr/local/cuda/include")
     .file("activate.cu")
     .file("image.cu")

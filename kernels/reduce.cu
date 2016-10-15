@@ -1,4 +1,5 @@
 #include <cuda_runtime_api.h>
+#include <math_constants.h>
 #include <stdint.h>
 
 #define OFFSET_BANK(idx) ({ __typeof__ (idx) _idx = idx; ((_idx) + ((_idx) / 32)); })
@@ -16,9 +17,11 @@ __global__ void batch_blockreduce_argmax_kernel(
   int block = blockIdx.x;
   int i = tid + block * len;
   if (tid < len && block < batch_size) {
-    cache[OFFSET_BANK(tid)]     = xs[i];
-    cache_idx[OFFSET_BANK(tid)] = tid;
+    cache[OFFSET_BANK(tid)] = xs[i];
+  } else {
+    cache[OFFSET_BANK(tid)] = -CUDART_INF_F;
   }
+  cache_idx[OFFSET_BANK(tid)] = tid;
   __syncthreads();
   for (int s = 1; s < blockDim.x; s *= 2) {
     if (tid < len && block < batch_size) {
@@ -67,6 +70,8 @@ __global__ void batch_blockreduce_sum_kernel(
   int i = tid + block * len;
   if (tid < len && block < batch_size) {
     cache[OFFSET_BANK(tid)] = xs[i];
+  } else {
+    cache[OFFSET_BANK(tid)] = 0.0f;
   }
   __syncthreads();
   for (int s = 1; s < blockDim.x; s *= 2) {
