@@ -9,6 +9,7 @@ extern crate rng;
 extern crate libc;
 extern crate rand;
 
+pub mod activate;
 pub mod affine;
 pub mod archs;
 pub mod class_loss;

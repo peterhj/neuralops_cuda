@@ -1,5 +1,5 @@
 use prelude::*;
-use kernels::*;
+use activate::{DeviceActivateKernel};
 
 use densearray::prelude::*;
 use devicemem_cuda::prelude::*;
@@ -31,7 +31,7 @@ pub struct DeviceAffineOperator<S> {
   b_grad:   DeviceArray1d<f32>,
   tmp_buf:  DeviceMem<f32>,
   tmp_grad: DeviceMem<f32>,
-  //act_kern: ActivateKernel,
+  act_kern: DeviceActivateKernel,
 }
 
 impl<S> DeviceAffineOperator<S> {
@@ -54,7 +54,7 @@ impl<S> DeviceAffineOperator<S> {
       b_grad:   DeviceArray1d::zeros(cfg.out_dim, conn.clone()),
       tmp_buf:  DeviceMem::zeros(out_len, conn.clone()),
       tmp_grad: DeviceMem::zeros(out_len, conn.clone()),
-      //act_kern: ActivateKernel::new(cfg.batch_sz, cfg.out_dim, cfg.act_kind),
+      act_kern: DeviceActivateKernel::new(cfg.out_dim, cfg.act_kind),
     }))
   }
 }
@@ -193,26 +193,15 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
         );
     }
 
-    // FIXME: activation.
-    //self.act_kern.forward(batch_size, &self.tmp_buf, &mut *self.out.buf.borrow_mut());
     let mut out_buf = self.out.buf.borrow_mut();
-    self.tmp_buf.as_ref().wait(&self.conn);
-    out_buf.as_ref().wait(&self.conn);
-    unsafe { neuralops_cuda_activate_rect_fwd(
-        self.tmp_buf.as_ref().as_ptr(),
-        batch_size * self.cfg.out_dim,
-        out_buf.as_mut().as_mut_ptr(),
-        self.conn.stream().ptr,
-    ) };
-    self.tmp_buf.as_ref().post(&self.conn);
-    out_buf.as_ref().post(&self.conn);
+    self.act_kern._forward(batch_size, self.tmp_buf.as_ref(), out_buf.as_mut(), self.conn.clone());
   }
 
   fn _backward(&mut self) {
     let batch_size = self.out.batch_sz.get();
 
-    // FIXME: activation.
-    //self.act_kern.backward(batch_size, &self.tmp_buf, &self.out.grad.as_ref().unwrap().borrow(), &mut self.tmp_grad);
+    let out_grad = self.out.grad.as_ref().unwrap().borrow();
+    self.act_kern._backward(batch_size, self.tmp_buf.as_ref(), out_grad.as_ref(), self.tmp_grad.as_mut(), self.conn.clone());
 
     let in_buf = self.in_.buf.borrow();
     self.w_grad.as_view_mut()
