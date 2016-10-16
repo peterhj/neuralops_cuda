@@ -95,7 +95,7 @@ impl<S> NewDiffOperator<S> for DeviceAddJoinOperator<S> {
       assert_eq!(batch_size, arm_batch_size);
       let in_buf = self.in_[arm].buf.borrow();
       out_buf.as_mut().reshape_mut(batch_size * self.cfg.dim)
-        .add(1.0, in_buf.as_ref().reshape(batch_size * self.cfg.dim), 1.0, self.stream.conn());
+        .add(1.0, in_buf.as_ref().reshape(batch_size * self.cfg.dim), self.stream.conn());
     }
   }
 

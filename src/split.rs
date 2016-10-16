@@ -100,7 +100,7 @@ impl<S> NewDiffOperator<S> for DeviceCopySplitOperator<S> {
         assert_eq!(batch_size, arm_batch_size);
         let out_grad = self.out[arm].grad.as_ref().unwrap().borrow();
         in_grad.as_mut().reshape_mut(batch_size * self.cfg.dim)
-          .add(1.0, out_grad.as_ref().reshape(batch_size * self.cfg.dim), 1.0, self.stream.conn());
+          .add(1.0, out_grad.as_ref().reshape(batch_size * self.cfg.dim), self.stream.conn());
       }
     }
   }

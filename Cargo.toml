@@ -21,8 +21,12 @@ name = "train-mnist-new"
 path = "tools/train-mnist-new.rs"
 
 [[bin]]
-name = "train-cifar10-new"
-path = "tools/train-cifar10-new.rs"
+name = "train-cifar10-sgd"
+path = "tools/train-cifar10-sgd.rs"
+
+[[bin]]
+name = "train-cifar10-adam"
+path = "tools/train-cifar10-adam.rs"
 
 #[build-dependencies]
 #gcc = "*"

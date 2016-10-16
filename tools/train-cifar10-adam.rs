@@ -12,6 +12,7 @@ use neuralops::data::cifar::{CifarFlavor, CifarDataShard};
 //use neuralops::archs::*;
 use neuralops_cuda::archs::*;
 use operator::prelude::*;
+use operator::opt::adam_new::{AdamConfig, AdamWorker};
 use operator::opt::sgd_new::{SgdConfig, SgdWorker};
 use rng::xorshift::{Xorshiftplus128Rng};
 
@@ -38,32 +39,34 @@ fn main() {
   //let loss = build_cifar10_resnet20_loss(batch_sz);
   let loss = build_cifar10_resnet20_loss(batch_sz, stream);
 
-  let sgd_cfg = SgdConfig{
+  let opt_cfg = AdamConfig{
     batch_sz:       batch_sz,
     minibatch_sz:   batch_sz,
-    //step_size:      StepSize::Constant(0.1),
-    step_size:      StepSize::Decay{init_step: 0.1, step_decay: 0.1, decay_iters: 50000},
-    momentum:       Some(GradientMomentum::Nesterov(0.9)),
+    //step_size:      StepSize::Constant(0.01),
+    step_size:      StepSize::Decay{init_step: 0.01, step_decay: 0.1, decay_iters: 50000},
+    gamma1:         0.1,
+    gamma2:         0.001,
+    epsilon:        1.0e-8,
     checkpoint:     None,
   };
-  let mut sgd = SgdWorker::new(sgd_cfg, loss);
+  let mut opt = AdamWorker::new(opt_cfg, loss);
 
   let mut rng = Xorshiftplus128Rng::new(&mut thread_rng());
   println!("DEBUG: training (CUDA version)...");
-  sgd.reset_opt_stats();
-  sgd.init_param(&mut rng);
-  for iter_nr in 0 .. 100000 {
-    sgd.step(&mut train_data);
-    if (iter_nr + 1) % 10 == 0 {
-      println!("DEBUG: iter: {} accuracy: {:.3} stats: {:?}", iter_nr + 1, sgd.get_opt_stats().accuracy(), sgd.get_opt_stats());
-      sgd.reset_opt_stats();
+  opt.reset_opt_stats();
+  opt.init_param(&mut rng);
+  for iter_nr in 0 .. 150000 {
+    opt.step(&mut train_data);
+    if (iter_nr + 1) % 50 == 0 {
+      println!("DEBUG: iter: {} accuracy: {:.3} stats: {:?}", iter_nr + 1, opt.get_opt_stats().accuracy(), opt.get_opt_stats());
+      opt.reset_opt_stats();
     }
     if (iter_nr + 1) % 500 == 0 {
       println!("DEBUG: validating...");
-      sgd.reset_opt_stats();
-      sgd.eval(valid_data.len(), &mut valid_data);
-      println!("DEBUG: valid: accuracy: {:.3} stats: {:?}", sgd.get_opt_stats().accuracy(), sgd.get_opt_stats());
-      sgd.reset_opt_stats();
+      opt.reset_opt_stats();
+      opt.eval(valid_data.len(), &mut valid_data);
+      println!("DEBUG: valid: accuracy: {:.3} stats: {:?}", opt.get_opt_stats().accuracy(), opt.get_opt_stats());
+      opt.reset_opt_stats();
     }
   }
 }
