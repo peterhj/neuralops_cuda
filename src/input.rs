@@ -505,9 +505,10 @@ impl NewDiffOperator<SampleItem> for DeviceVarInputOperator<SampleItem> {
       }
     }
     let out_len = self.cfg.out_dim.flat_len();
+    assert!(out_len <= self.cfg.max_stride);
     for idx in 0 .. batch_size {
       assert_eq!(self.cfg.out_dim, self.tmp_dims[idx]);
-      let out = out_buf.as_ref().slice(idx * self.cfg.max_stride, (idx+1) * self.cfg.max_stride);
+      let out = out_buf.as_ref().slice(idx * self.cfg.max_stride, idx * self.cfg.max_stride + out_len);
       let mut tmp = self.tmp_buf.as_mut().slice_mut(idx * out_len, (idx+1) * out_len);
       tmp.copy(out, self.stream.conn());
     }

@@ -375,7 +375,7 @@ pub fn build_imagenet_resnet18_loss(batch_sz: usize, stream: DeviceStream) -> Rc
   };
   let loss_cfg = ClassLossConfig{
     batch_sz:       batch_sz,
-    num_classes:    10,
+    num_classes:    1000,
   };
   let input = DeviceVarInputOperator::new(input_cfg, OpCapability::Backward, stream.clone());
   let conv1 = DeviceBatchNormConv2dOperator::new(conv1_cfg, OpCapability::Backward, input, 0, stream.clone());
