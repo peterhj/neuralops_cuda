@@ -10,7 +10,8 @@ use std::rc::{Rc};
 const RESNET_AVG_RATE:  f32 = 0.05;
 const RESNET_EPSILON:   f32 = 1.0e-6;
 
-pub fn build_cifar10_resnet20_loss<S>(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S>>> where S: 'static + SampleDatum<[f32]> + SampleLabel {
+//pub fn build_cifar10_resnet20_loss<S>(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S>>> where S: 'static + SampleDatum<[f32]> + SampleLabel {
+pub fn build_cifar10_resnet20_loss(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<SampleItem>>> {
   let input_cfg = VarInputOperatorConfig{
     batch_sz:   batch_sz,
     max_stride: 32 * 32 * 3,
@@ -124,7 +125,8 @@ pub fn build_cifar10_resnet20_loss<S>(batch_sz: usize, stream: DeviceStream) -> 
   loss
 }
 
-pub fn build_cifar10_resnet56_loss<S>(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S>>> where S: 'static + SampleDatum<[f32]> + SampleLabel {
+//pub fn build_cifar10_resnet56_loss<S>(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S>>> where S: 'static + SampleDatum<[f32]> + SampleLabel {
+pub fn build_cifar10_resnet56_loss(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<SampleItem>>> {
   let input_cfg = VarInputOperatorConfig{
     batch_sz:   batch_sz,
     max_stride: 32 * 32 * 3,
