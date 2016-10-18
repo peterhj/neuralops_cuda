@@ -348,7 +348,7 @@ pub fn build_imagenet_resnet18_loss(batch_sz: usize, stream: DeviceStream) -> Rc
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
-  let res3_cfg = ResidualConv2dOperatorConfig{
+  let res4_cfg = ResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (7, 7, 512),
     avg_rate:   RESNET_AVG_RATE,
@@ -356,7 +356,7 @@ pub fn build_imagenet_resnet18_loss(batch_sz: usize, stream: DeviceStream) -> Rc
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
-  let pool_cfg = Pool2dOperatorConfig{
+  let global_pool_cfg = Pool2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (7, 7, 512),
     pool_w:     7,  pool_h:     7,
@@ -386,10 +386,10 @@ pub fn build_imagenet_resnet18_loss(batch_sz: usize, stream: DeviceStream) -> Rc
   let res2_2 = DeviceResidualConv2dOperator::new(res2_cfg, OpCapability::Backward, res2_1, 0, stream.clone());
   let res3_1 = DeviceProjResidualConv2dOperator::new(proj_res3_cfg, OpCapability::Backward, res2_2, 0, stream.clone());
   let res3_2 = DeviceResidualConv2dOperator::new(res3_cfg, OpCapability::Backward, res3_1, 0, stream.clone());
-  let res4_1 = DeviceProjResidualConv2dOperator::new(proj_res3_cfg, OpCapability::Backward, res3_2, 0, stream.clone());
-  let res4_2 = DeviceResidualConv2dOperator::new(res3_cfg, OpCapability::Backward, res4_1, 0, stream.clone());
-  let pool = DevicePool2dOperator::new(pool_cfg, OpCapability::Backward, res4_2, 0, stream.clone());
-  let affine = DeviceAffineOperator::new(affine_cfg, OpCapability::Backward, pool, 0, stream.clone());
+  let res4_1 = DeviceProjResidualConv2dOperator::new(proj_res4_cfg, OpCapability::Backward, res3_2, 0, stream.clone());
+  let res4_2 = DeviceResidualConv2dOperator::new(res4_cfg, OpCapability::Backward, res4_1, 0, stream.clone());
+  let global_pool = DevicePool2dOperator::new(global_pool_cfg, OpCapability::Backward, res4_2, 0, stream.clone());
+  let affine = DeviceAffineOperator::new(affine_cfg, OpCapability::Backward, global_pool, 0, stream.clone());
   let loss = DeviceSoftmaxNLLClassLoss::new(loss_cfg, OpCapability::Backward, affine, 0, stream.clone());
   loss
 }
