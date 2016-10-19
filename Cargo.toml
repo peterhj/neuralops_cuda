@@ -2,11 +2,6 @@
 name = "neuralops_cuda"
 version = "0.1.0"
 authors = ["Peter Jin <peterhaijin@gmail.com>"]
-#build = "build.rs"
-
-#[features]
-#default = ["nnpack"]
-#mkl = ["mkl_dnn", "nnpack"]
 
 [lib]
 name = "neuralops_cuda"
@@ -28,8 +23,17 @@ path = "tools/train-cifar10-sgd.rs"
 name = "train-cifar10-adam"
 path = "tools/train-cifar10-adam.rs"
 
-#[build-dependencies]
-#gcc = "*"
+[[bin]]
+name = "train-imagenet-sgd"
+path = "tools/train-imagenet-sgd.rs"
+
+[[bin]]
+name = "shared-train-imagenet-sgd"
+path = "tools/shared-train-imagenet-sgd.rs"
+
+#[[bin]]
+#name = "train"
+#path = "tools/train.rs"
 
 [dependencies]
 neuralops_cuda_kernels = { path = "kernels" }
@@ -42,8 +46,6 @@ cuda_dnn = { path = "../libcuda_dnn" }
 densearray = { path = "../libdensearray" }
 devicemem_cuda = { path = "../libdevicemem_cuda" }
 iter_utils = { path = "../libiter_utils" }
-#mkl_dnn = { path = "../libmkl_dnn", optional = true }
-#nnpack = { path = "../libnnpack", optional = true }
 neuralops = { path = "../neuralops" }
 operator = { path = "../liboperator" }
 rng = { path = "../librng" }
