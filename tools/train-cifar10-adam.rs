@@ -13,7 +13,7 @@ use neuralops::data::cifar::{CifarFlavor, CifarDataShard};
 use neuralops_cuda::archs::*;
 use operator::prelude::*;
 use operator::opt::adam_new::{AdamConfig, AdamWorker};
-use operator::opt::sgd_new::{SgdConfig, SgdWorker};
+//use operator::opt::sgd_new::{SgdConfig, SgdWorker};
 use rng::xorshift::{Xorshiftplus128Rng};
 
 use rand::{thread_rng};
@@ -49,14 +49,25 @@ fn main() {
     epsilon:        1.0e-8,
     //checkpoint:     None,
   };
+  let mut checkpoint = CheckpointState::new(CheckpointConfig{
+    prefix: PathBuf::from("logs/cifar10_resnet20_adam"),
+    trace:  true,
+  });
+  checkpoint.append_config_info(&opt_cfg);
   let mut opt = AdamWorker::new(opt_cfg, loss);
-
+  let mut stats = ClassLossStats::default();
   let mut rng = Xorshiftplus128Rng::new(&mut thread_rng());
+
   println!("DEBUG: training (CUDA version)...");
   opt.reset_opt_stats();
   opt.init_param(&mut rng);
   for iter_nr in 0 .. 150000 {
+    checkpoint.start_timing();
     opt.step(&mut train_data);
+    checkpoint.stop_timing();
+    opt.update_stats(&mut stats);
+    checkpoint.append_class_stats_train(&stats);
+    stats.reset();
     if (iter_nr + 1) % 50 == 0 {
       println!("DEBUG: iter: {} accuracy: {:.3} stats: {:?}", iter_nr + 1, opt.get_opt_stats().accuracy(), opt.get_opt_stats());
       opt.reset_opt_stats();
@@ -64,7 +75,12 @@ fn main() {
     if (iter_nr + 1) % 500 == 0 {
       println!("DEBUG: validating...");
       opt.reset_opt_stats();
+      checkpoint.start_timing();
       opt.eval(valid_data.len(), &mut valid_data);
+      checkpoint.stop_timing();
+      opt.update_stats(&mut stats);
+      checkpoint.append_class_stats_valid(&stats);
+      stats.reset();
       println!("DEBUG: valid: accuracy: {:.3} stats: {:?}", opt.get_opt_stats().accuracy(), opt.get_opt_stats());
       opt.reset_opt_stats();
     }
