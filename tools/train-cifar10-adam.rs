@@ -47,7 +47,7 @@ fn main() {
     gamma1:         0.1,
     gamma2:         0.001,
     epsilon:        1.0e-8,
-    checkpoint:     None,
+    //checkpoint:     None,
   };
   let mut opt = AdamWorker::new(opt_cfg, loss);
 

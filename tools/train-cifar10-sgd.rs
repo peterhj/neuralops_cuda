@@ -44,16 +44,27 @@ fn main() {
     //step_size:      StepSize::Constant(0.1),
     step_size:      StepSize::Decay{init_step: 0.1, step_decay: 0.1, decay_iters: 50000},
     momentum:       Some(GradientMomentum::Nesterov(0.9)),
-    checkpoint:     None,
+    //checkpoint:     None,
   };
+  let mut checkpoint = CheckpointState::new(CheckpointConfig{
+    prefix: PathBuf::from("logs/cifar10_resnet20_sgd"),
+    trace:  true,
+  });
+  checkpoint.append_config_info(&sgd_cfg);
   let mut sgd = SgdWorker::new(sgd_cfg, loss);
-
+  let mut stats = ClassLossStats::default();
   let mut rng = Xorshiftplus128Rng::new(&mut thread_rng());
+
   println!("DEBUG: training (CUDA version)...");
   sgd.reset_opt_stats();
   sgd.init_param(&mut rng);
   for iter_nr in 0 .. 150000 {
+    checkpoint.start_timing();
     sgd.step(&mut train_data);
+    checkpoint.stop_timing();
+    sgd.update_stats(&mut stats);
+    checkpoint.append_class_stats_train(&stats);
+    stats.reset();
     if (iter_nr + 1) % 50 == 0 {
       println!("DEBUG: iter: {} accuracy: {:.3} stats: {:?}", iter_nr + 1, sgd.get_opt_stats().accuracy(), sgd.get_opt_stats());
       sgd.reset_opt_stats();
@@ -61,7 +72,12 @@ fn main() {
     if (iter_nr + 1) % 500 == 0 {
       println!("DEBUG: validating...");
       sgd.reset_opt_stats();
+      checkpoint.start_timing();
       sgd.eval(valid_data.len(), &mut valid_data);
+      checkpoint.stop_timing();
+      sgd.update_stats(&mut stats);
+      checkpoint.append_class_stats_valid(&stats);
+      stats.reset();
       println!("DEBUG: valid: accuracy: {:.3} stats: {:?}", sgd.get_opt_stats().accuracy(), sgd.get_opt_stats());
       sgd.reset_opt_stats();
     }

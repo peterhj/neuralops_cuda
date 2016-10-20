@@ -64,7 +64,7 @@ fn main() {
     //step_size:      StepSize::Constant(0.1),
     step_size:      StepSize::Decay{init_step: 0.1, step_decay: 0.1, decay_iters: 150000},
     momentum:       Some(GradientMomentum::Nesterov(0.9)),
-    checkpoint:     None,
+    //checkpoint:     None,
   };
   let mut sgd = SgdWorker::new(sgd_cfg, loss);
 

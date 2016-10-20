@@ -94,10 +94,10 @@ fn main() {
     minibatch_sz:   batch_sz,
     step_size:      StepSize::Constant(0.01),
     momentum:       Some(GradientMomentum::Nesterov(0.9)),
-    checkpoint:     Some(CheckpointConfig{
+    /*checkpoint:     Some(CheckpointConfig{
       prefix:   PathBuf::from("logs/mnist_accsgd_test"),
       trace:    true,
-    }),
+    }),*/
   };
   let mut sgd = SgdWorker::new(sgd_cfg, loss);
 

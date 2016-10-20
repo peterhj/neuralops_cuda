@@ -65,7 +65,7 @@ fn main() {
     minibatch_sz:   batch_sz,
     step_size:      StepSize::Constant(0.1),
     momentum:       Some(GradientMomentum::Nesterov(0.9)),
-    checkpoint:     None,
+    //checkpoint:     None,
   };
   let mut sgd = SgdWorker::new(sgd_cfg, loss);
 

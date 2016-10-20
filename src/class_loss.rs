@@ -26,6 +26,7 @@ pub struct DeviceSoftmaxNLLClassLoss<S> /*where S: SampleLabel*/ {
   losses:   DeviceMem<f32>,
   probs:    DeviceMem<f32>,
   hats:     DeviceMem<u32>,
+  nsamples: usize,
   acc_loss: f32,
   reg_loss: f32,
   accuracy: usize,
@@ -68,6 +69,7 @@ impl<S> DeviceSoftmaxNLLClassLoss<S> /*where S: SampleLabel*/ {
       losses:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
       probs:    DeviceMem::zeros(cfg.batch_sz * cfg.num_classes, stream.conn()),
       hats:     DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      nsamples: 0,
       acc_loss: 0.0,
       reg_loss: 0.0,
       accuracy: 0,
@@ -315,6 +317,7 @@ impl NewDiffOperator<SampleItem> for DeviceSoftmaxNLLClassLoss<SampleItem> {
         batch_accuracy += 1;
       }
     }
+    self.nsamples += batch_size;
     self.acc_loss += batch_loss;
     self.accuracy += batch_accuracy;
   }
@@ -336,8 +339,19 @@ impl NewDiffOperator<SampleItem> for DeviceSoftmaxNLLClassLoss<SampleItem> {
   }
 }
 
+impl<S> LossReport<ClassLossStats> for DeviceSoftmaxNLLClassLoss<S> {
+  fn update_stats(&mut self, iter_nr: usize, stats: &mut ClassLossStats) {
+    let batch_size = self.out.batch_sz.get();
+    stats.iter_nr = iter_nr;
+    stats.sample_count += self.nsamples;
+    stats.correct_count += self.accuracy;
+    stats.accum_loss += self.acc_loss + self.reg_loss;
+  }
+}
+
 impl DiffLoss<SampleItem> for DeviceSoftmaxNLLClassLoss<SampleItem> {
   fn reset_loss(&mut self) {
+    self.nsamples = 0;
     self.acc_loss = 0.0;
     self.reg_loss = 0.0;
     self.accuracy = 0;
