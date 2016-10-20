@@ -7,8 +7,9 @@ extern crate rng;
 
 use devicemem_cuda::prelude::*;
 use neuralops::prelude::*;
-use neuralops::data::{CyclicDataIter, RandomSampleDataIter, EasyClassLabel};
+use neuralops::data::{IndexedDataShard, CyclicDataIter, RandomSampleDataIter, EasyClassLabel};
 use neuralops::data::jpeg::{DecodeJpegData};
+use neuralops::data::ndarray::{DecodeArray3dData};
 use neuralops::data::varraydb::{SharedVarrayDbShard};
 use neuralops_cuda::archs::*;
 use operator::prelude::*;
@@ -46,12 +47,15 @@ fn main() {
       SharedVarrayDbShard::open(
           PathBuf::from("/scratch/phj/data/ilsvrc2012_v3_shuf/ilsvrc2012_maxscale480_shuf_train_data.varraydb"),
       ))));
+  let valid_db = SharedVarrayDbShard::open(
+      PathBuf::from("/scratch/phj/data/ilsvrc2012_v3_orig/ilsvrc2012_scale256_orig_valid_data.varraydb"),
+  );
+  let valid_epoch_sz = valid_db.len();
   let mut valid_data =
-      // FIXME: this uses the NdArray serialized format!
+      DecodeArray3dData::new(
       EasyClassLabel::new(
       CyclicDataIter::new(
-      SharedVarrayDbShard::open(
-          PathBuf::from("/scratch/phj/data/ilsvrc2012_v3_orig/ilsvrc2012_scale256_orig_valid_data.varraydb"),
+          valid_db
       )));
 
   let stream = DeviceStream::new(rank);
@@ -70,13 +74,13 @@ fn main() {
       println!("DEBUG: iter: {} accuracy: {:.3} stats: {:?}", iter_nr + 1, sgd.get_opt_stats().accuracy(), sgd.get_opt_stats());
       sgd.reset_opt_stats();
     }
-    /*if (iter_nr + 1) % 500 == 0 {
+    if (iter_nr + 1) % 625 == 0 {
       println!("DEBUG: validating...");
       sgd.reset_opt_stats();
-      sgd.eval(valid_data.len(), &mut valid_data);
+      sgd.eval(valid_epoch_sz, &mut valid_data);
       println!("DEBUG: valid: accuracy: {:.3} stats: {:?}", sgd.get_opt_stats().accuracy(), sgd.get_opt_stats());
       sgd.reset_opt_stats();
-    }*/
+    }
   }
     });
     handles.push(handle);
