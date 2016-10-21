@@ -37,7 +37,7 @@ fn main() {
 
   let stream = DeviceStream::new(0);
   //let loss = build_cifar10_resnet20_loss(batch_sz);
-  let loss = build_cifar10_resnet20_loss(batch_sz, stream);
+  let loss = build_cifar10_resnet20_loss(batch_sz, true, stream);
 
   let opt_cfg = AdamConfig{
     batch_sz:       batch_sz,

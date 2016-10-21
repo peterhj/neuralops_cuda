@@ -20,6 +20,10 @@ name = "train-cifar10-sgd"
 path = "tools/train-cifar10-sgd.rs"
 
 [[bin]]
+name = "train-cifar10-adagrad"
+path = "tools/train-cifar10-adagrad.rs"
+
+[[bin]]
 name = "train-cifar10-adam"
 path = "tools/train-cifar10-adam.rs"
 
