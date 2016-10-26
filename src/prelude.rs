@@ -5,4 +5,5 @@ pub use conv::*;
 pub use input::*;
 pub use join::*;
 pub use pool::*;
+pub use regress_loss::*;
 pub use split::*;

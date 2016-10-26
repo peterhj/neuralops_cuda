@@ -18,6 +18,13 @@ extern "C" {
       in_delta: *mut f32,
       stream: cudaStream_t);
 
+  pub fn neuralops_cuda_clamp(
+      y: *mut f32,
+      dim: size_t,
+      clamp_lo: f32,
+      clamp_hi: f32,
+      stream: cudaStream_t);
+
   pub fn neuralops_cuda_conv2d_scale_fwd(
       in_buf: *const f32,
       spatial_dim: size_t,
@@ -96,6 +103,25 @@ extern "C" {
       in_width: size_t, in_height: size_t, channels: size_t,
       out_pixels: *mut f32,
       out_width: size_t, out_height: size_t,
+      stream: cudaStream_t);
+
+  pub fn neuralops_cuda_ind_lst_sq_fwd(
+      in_buf: *const f32,
+      dim: size_t,
+      batch_sz: size_t,
+      targets: *const f32,
+      labels: *const u32,
+      weights: *const f32,
+      loss: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_ind_lst_sq_bwd(
+      in_buf: *const f32,
+      dim: size_t,
+      batch_sz: size_t,
+      targets: *const f32,
+      labels: *const u32,
+      weights: *const f32,
+      in_grad: *mut f32,
       stream: cudaStream_t);
 
   pub fn neuralops_cuda_batchmap_add(

@@ -7,8 +7,10 @@ use operator::prelude::*;
 use std::cell::{RefCell};
 use std::rc::{Rc};
 
-const RESNET_AVG_RATE:  f32 = 0.05;
-const RESNET_EPSILON:   f32 = 1.0e-6;
+const BATCH_NORM_AVG_RATE:  f32 = 0.05;
+const BATCH_NORM_EPSILON:   f32 = 1.0e-6;
+
+const INFOGAN_LEAKINESS:    f32 = 0.01;
 
 //pub fn build_cifar10_resnet20_loss<S>(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S>>> where S: 'static + SampleDatum<[f32]> + SampleLabel {
 pub fn build_cifar10_resnet20_loss(batch_sz: usize, augment: bool, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<SampleItem>>> {
@@ -31,73 +33,65 @@ pub fn build_cifar10_resnet20_loss(batch_sz: usize, augment: bool, stream: Devic
   let conv1_cfg = BatchNormConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (32, 32, 3),
-    kernel_w:   3,
-    kernel_h:   3,
-    stride_w:   1,
-    stride_h:   1,
-    pad_w:      1,
-    pad_h:      1,
+    kernel_w:   3,  kernel_h:   3,
+    stride_w:   1,  stride_h:   1,
+    pad_w:      1,  pad_h:      1,
     out_chan:   16,
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let res1_cfg = ResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (32, 32, 16),
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let proj_res2_cfg = ProjResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (32, 32, 16),
-    stride_w:   2,
-    stride_h:   2,
+    stride_w:   2,  stride_h:   2,
     out_chan:   32,
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let res2_cfg = ResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (16, 16, 32),
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let proj_res3_cfg = ProjResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (16, 16, 32),
-    stride_w:   2,
-    stride_h:   2,
+    stride_w:   2,  stride_h:   2,
     out_chan:   64,
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let res3_cfg = ResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (8, 8, 64),
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let pool_cfg = Pool2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (8, 8, 64),
-    pool_w:     8,
-    pool_h:     8,
-    stride_w:   8,
-    stride_h:   8,
-    pad_w:      0,
-    pad_h:      0,
+    pool_w:     8,  pool_h:     8,
+    stride_w:   8,  stride_h:   8,
+    pad_w:      0,  pad_h:      0,
     kind:       PoolKind::Average,
   };
   let affine_cfg = AffineOperatorConfig{
@@ -146,73 +140,65 @@ pub fn build_cifar10_resnet56_loss(batch_sz: usize, stream: DeviceStream) -> Rc<
   let conv1_cfg = BatchNormConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (32, 32, 3),
-    kernel_w:   3,
-    kernel_h:   3,
-    stride_w:   1,
-    stride_h:   1,
-    pad_w:      1,
-    pad_h:      1,
+    kernel_w:   3,  kernel_h:   3,
+    stride_w:   1,  stride_h:   1,
+    pad_w:      1,  pad_h:      1,
     out_chan:   16,
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let res1_cfg = ResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (32, 32, 16),
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let proj_res2_cfg = ProjResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (32, 32, 16),
-    stride_w:   2,
-    stride_h:   2,
+    stride_w:   2,  stride_h:   2,
     out_chan:   32,
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let res2_cfg = ResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (16, 16, 32),
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let proj_res3_cfg = ProjResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (16, 16, 32),
-    stride_w:   2,
-    stride_h:   2,
+    stride_w:   2,  stride_h:   2,
     out_chan:   64,
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let res3_cfg = ResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (8, 8, 64),
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let pool_cfg = Pool2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (8, 8, 64),
-    pool_w:     8,
-    pool_h:     8,
-    stride_w:   8,
-    stride_h:   8,
-    pad_w:      0,
-    pad_h:      0,
+    pool_w:     8,  pool_h:     8,
+    stride_w:   8,  stride_h:   8,
+    pad_w:      0,  pad_h:      0,
     kind:       PoolKind::Average,
   };
   let affine_cfg = AffineOperatorConfig{
@@ -273,7 +259,7 @@ pub fn build_imagenet_resnet18_loss(batch_sz: usize, stream: DeviceStream) -> Rc
       VarInputPreproc::CenterCrop2d{crop_w: 224, crop_h: 224, phases: vec![OpPhase::Inference]},
       VarInputPreproc::RandomFlipX{phases: vec![OpPhase::Learning]},
       //VarInputPreproc::ChannelShift{shift: vec![125.0, 123.0, 114.0]},
-      VarInputPreproc::Scale{scale: 1.0 / 255.0},
+      VarInputPreproc::Scale{scale: 1.0 / 256.0},
       //VarInputPreproc::AddPixelwisePCALigtingNoise{},
     ],
   };
@@ -284,8 +270,8 @@ pub fn build_imagenet_resnet18_loss(batch_sz: usize, stream: DeviceStream) -> Rc
     stride_w:   2,  stride_h:   2,
     pad_w:      3,  pad_h:      3,
     out_chan:   64,
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
@@ -300,8 +286,8 @@ pub fn build_imagenet_resnet18_loss(batch_sz: usize, stream: DeviceStream) -> Rc
   let res1_cfg = ResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (56, 56, 64),
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
@@ -310,16 +296,16 @@ pub fn build_imagenet_resnet18_loss(batch_sz: usize, stream: DeviceStream) -> Rc
     in_dim:     (56, 56, 64),
     stride_w:   2,  stride_h:   2,
     out_chan:   128,
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let res2_cfg = ResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (28, 28, 128),
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
@@ -328,16 +314,16 @@ pub fn build_imagenet_resnet18_loss(batch_sz: usize, stream: DeviceStream) -> Rc
     in_dim:     (28, 28, 128),
     stride_w:   2,  stride_h:   2,
     out_chan:   256,
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let res3_cfg = ResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (14, 14, 256),
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
@@ -346,16 +332,16 @@ pub fn build_imagenet_resnet18_loss(batch_sz: usize, stream: DeviceStream) -> Rc
     in_dim:     (14, 14, 256),
     stride_w:   2,  stride_h:   2,
     out_chan:   512,
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };
   let res4_cfg = ResidualConv2dOperatorConfig{
     batch_sz:   batch_sz,
     in_dim:     (7, 7, 512),
-    avg_rate:   RESNET_AVG_RATE,
-    epsilon:    RESNET_EPSILON,
+    avg_rate:   BATCH_NORM_AVG_RATE,
+    epsilon:    BATCH_NORM_EPSILON,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   };

@@ -444,6 +444,33 @@ impl NewDiffOperator<SampleItem> for DeviceVarInputOperator<SampleItem> {
             }
           }
         }
+        &VarInputPreproc::OffsetCrop2d{crop_w, crop_h, offset_x, offset_y, ref phases} => {
+          if phases.contains(&phase) {
+            for idx in 0 .. batch_size {
+              let in_dim = self.tmp_dims[idx];
+              assert!(crop_w <= in_dim.0);
+              assert!(crop_h <= in_dim.1);
+              let out_dim = (crop_w, crop_h, in_dim.2);
+              let out_len = out_dim.flat_len();
+              {
+                let out = out_buf.as_ref().slice(idx * self.cfg.max_stride, (idx+1) * self.cfg.max_stride);
+                let tmp = self.tmp_buf.as_mut().slice_mut(idx * out_len, (idx+1) * out_len);
+                unsafe { neuralops_cuda_image2d_crop(
+                    out.as_ptr(),
+                    in_dim.0, in_dim.1, in_dim.2,
+                    offset_x, offset_y,
+                    tmp.as_mut_ptr(),
+                    out_dim.0, out_dim.1,
+                    self.stream.conn().raw_stream().ptr,
+                ) };
+              }
+              let tmp = self.tmp_buf.as_ref().slice(idx * out_len, (idx+1) * out_len);
+              let mut out = out_buf.as_mut().slice_mut(idx * self.cfg.max_stride, idx * self.cfg.max_stride + out_len);
+              out.copy(tmp, self.stream.conn());
+              self.tmp_dims[idx] = out_dim;
+            }
+          }
+        }
         &VarInputPreproc::CenterCrop2d{crop_w, crop_h, ref phases} => {
           if phases.contains(&phase) {
             for idx in 0 .. batch_size {

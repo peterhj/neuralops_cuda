@@ -42,12 +42,14 @@ fn main() {
     batch_sz:       batch_sz,
     minibatch_sz:   batch_sz,
     //step_size:      StepSize::Constant(0.1),
-    step_size:      StepSize::Decay{init_step: 0.1, step_decay: 0.1, decay_iters: 50000},
-    momentum:       Some(GradientMomentum::Nesterov(0.9)),
+    step_size:      StepSize::Decay{init_step: 1.0, step_decay: 0.1, decay_iters: 50000},
+    //step_size:      StepSize::Decay{init_step: 0.1, step_decay: 0.1, decay_iters: 50000},
+    momentum:       None,
+    //momentum:       Some(GradientMomentum::Nesterov(0.9)),
     //checkpoint:     None,
   };
   let mut checkpoint = CheckpointState::new(CheckpointConfig{
-    prefix: PathBuf::from("logs/cifar10_resnet20_sgd"),
+    prefix: PathBuf::from("logs/cifar10_resnet20_sgd_lr1.0-nomm"),
     trace:  true,
   });
   checkpoint.append_config_info(&sgd_cfg);
