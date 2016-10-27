@@ -40,6 +40,7 @@ pub struct DeviceIndLstSqRegressLoss<S> {
   ws_h:     Vec<f32>,
   //ts_h:     Vec<f32>,
   //hats_h:   Vec<u32>,
+  preds_h:  Vec<f32>,
   losses_h: Vec<f32>,
   softmax:  DeviceSoftmaxKernel,
 }
@@ -61,6 +62,8 @@ impl<S> DeviceIndLstSqRegressLoss<S> {
     //ts_h.resize(cfg.batch_sz, 1.0);
     //let mut hats_h = Vec::with_capacity(cfg.batch_sz);
     //hats_h.resize(cfg.batch_sz, 0);
+    let mut preds_h = Vec::with_capacity(cfg.batch_sz * cfg.index_sz);
+    preds_h.resize(cfg.batch_sz * cfg.index_sz, 0.0);
     let mut losses_h = Vec::with_capacity(cfg.batch_sz);
     losses_h.resize(cfg.batch_sz, 0.0);
     Rc::new(RefCell::new(DeviceIndLstSqRegressLoss{
@@ -87,6 +90,7 @@ impl<S> DeviceIndLstSqRegressLoss<S> {
       ws_h:     ws_h,
       //ts_h:     ts_h,
       //hats_h:   hats_h,
+      preds_h:  preds_h,
       losses_h: losses_h,
       softmax:  DeviceSoftmaxKernel::new(cfg.batch_sz, cfg.index_sz, stream.conn()),
     }))
@@ -202,6 +206,7 @@ impl NewDiffOperator<SampleItem> for DeviceIndLstSqRegressLoss<SampleItem> {
     self.weights.as_ref().post(&self.stream.conn());
     self.losses.as_ref().post(&self.stream.conn());
 
+    in_buf.as_ref().store_sync(&mut self.preds_h, self.stream.conn());
     self.losses.as_ref().store_sync(&mut self.losses_h, self.stream.conn());
 
     let mut batch_loss = 0.0;
@@ -270,6 +275,10 @@ impl DiffLoss<SampleItem> for DeviceIndLstSqRegressLoss<SampleItem> {
   /*fn _store_accuracy(&mut self) -> usize {
     self.accuracy
   }*/
+
+  fn _get_pred(&mut self) -> &[f32] {
+    &self.preds_h
+  }
 }
 
 /*impl<S> LossReport<ClassLossStats> for DeviceIndLstSqRegressLoss<S> {

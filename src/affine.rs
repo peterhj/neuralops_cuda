@@ -115,7 +115,8 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
         }
       }
       ParamInitKind::Xavier => {
-        let half_range = (6.0 / (self.cfg.in_dim + self.cfg.out_dim) as f64).sqrt();
+        //let half_range = (6.0 / (self.cfg.in_dim + self.cfg.out_dim) as f64).sqrt();
+        let half_range = (3.0 / self.cfg.in_dim as f64).sqrt();
         let dist = Range::new(-half_range, half_range);
         for e in self.hweights.as_mut_slice().iter_mut() {
           *e = dist.ind_sample(rng) as f32;
@@ -130,11 +131,12 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
         }
       }
     }
-    for e in self.hbias.as_mut_slice().iter_mut() {
+    self.weights.as_view_mut().load_sync(self.hweights.as_view(), self.stream.conn());
+    /*for e in self.hbias.as_mut_slice().iter_mut() {
       *e = 0.0;
     }
-    self.weights.as_view_mut().load_sync(self.hweights.as_view(), self.stream.conn());
-    self.bias.as_view_mut().load_sync(self.hbias.as_view(), self.stream.conn());
+    self.bias.as_view_mut().load_sync(self.hbias.as_view(), self.stream.conn());*/
+    self.bias.as_view_mut().set_constant(0.0, self.stream.conn());
   }
 
   fn _load_diff_param(&mut self, init_offset: usize, param_reader: &mut [f32]) -> usize {
