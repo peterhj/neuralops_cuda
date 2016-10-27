@@ -371,7 +371,7 @@ impl<S> NewDiffOperator<S> for DeviceConv2dOperator<S> {
       }
       ParamInitKind::Xavier => {
         //let half_range = (6.0 / (self.cfg.in_dim.2 + self.cfg.out_chan) as f64).sqrt();
-        let half_range = (3.0 / self.cfg.out_chan as f64).sqrt();
+        let half_range = (3.0 / (self.cfg.kernel_w * self.cfg.kernel_h * self.cfg.in_dim.2) as f64).sqrt();
         let dist = Range::new(-half_range, half_range);
         for e in self.hweights.as_mut_slice().iter_mut() {
           *e = dist.ind_sample(rng) as f32;
@@ -525,7 +525,7 @@ impl<S> NewDiffOperator<S> for DeviceConv2dOperator<S> {
   }
 }
 
-pub struct DeviceConv2dNoBiasOperator<S> {
+/*pub struct DeviceConv2dNoBiasOperator<S> {
   cfg:      Conv2dOperatorConfig,
   node:     OperatorNode,
   stream:   DeviceStream,
@@ -533,15 +533,15 @@ pub struct DeviceConv2dNoBiasOperator<S> {
   in_:      DeviceOutput,
   out:      DeviceOutput,
   hweights: Array4d<f32>,
-  hbias:    Array1d<f32>,
+  //hbias:    Array1d<f32>,
   weights:  DeviceArray4d<f32>,
   w_grad:   DeviceArray4d<f32>,
-  bias:     DeviceArray1d<f32>,
-  b_grad:   DeviceArray1d<f32>,
+  //bias:     DeviceArray1d<f32>,
+  //b_grad:   DeviceArray1d<f32>,
   tmp_buf:  DeviceMem<f32>,
   tmp_grad: DeviceMem<f32>,
   scratch:  DeviceMem<u8>,
-  add_bias: CudnnAddOp,
+  //add_bias: CudnnAddOp,
   fwd:      CudnnConvFwdOp,
   bwd_w:    CudnnConvBwdFilterOp,
   bwd_d:    CudnnConvBwdDataOp,
@@ -591,15 +591,15 @@ impl<S> DeviceConv2dNoBiasOperator<S> {
       in_:      in_,
       out:      DeviceOutput::new(cfg.batch_sz, cfg.out_dim().flat_len(), cap, stream.conn()),
       hweights: Array4d::zeros((cfg.kernel_w, cfg.kernel_h, cfg.in_dim.2, cfg.out_chan)),
-      hbias:    Array1d::zeros(cfg.out_chan),
+      //hbias:    Array1d::zeros(cfg.out_chan),
       weights:  DeviceArray4d::zeros((cfg.kernel_w, cfg.kernel_h, cfg.in_dim.2, cfg.out_chan), stream.conn()),
       w_grad:   DeviceArray4d::zeros((cfg.kernel_w, cfg.kernel_h, cfg.in_dim.2, cfg.out_chan), stream.conn()),
-      bias:     DeviceArray1d::zeros(cfg.out_chan, stream.conn()),
-      b_grad:   DeviceArray1d::zeros(cfg.out_chan, stream.conn()),
+      //bias:     DeviceArray1d::zeros(cfg.out_chan, stream.conn()),
+      //b_grad:   DeviceArray1d::zeros(cfg.out_chan, stream.conn()),
       tmp_buf:  DeviceMem::zeros(cfg.batch_sz * cfg.out_dim().flat_len(), stream.conn()),
       tmp_grad: DeviceMem::zeros(cfg.batch_sz * cfg.out_dim().flat_len(), stream.conn()),
       scratch:  DeviceMem::zeros(workspace_size, stream.conn()),
-      add_bias: add_bias,
+      //add_bias: add_bias,
       fwd:      fwd,
       bwd_w:    bwd_w,
       bwd_d:    bwd_d,
@@ -665,7 +665,7 @@ impl<S> NewDiffOperator<S> for DeviceConv2dNoBiasOperator<S> {
       }
       ParamInitKind::Xavier => {
         //let half_range = (6.0 / (self.cfg.in_dim.2 + self.cfg.out_chan) as f64).sqrt();
-        let half_range = (3.0 / self.cfg.out_chan as f64).sqrt();
+        let half_range = (3.0 / (self.cfg.kernel_w * self.cfg.kernel_h * self.cfg.in_dim.2) as f64).sqrt();
         let dist = Range::new(-half_range, half_range);
         for e in self.hweights.as_mut_slice().iter_mut() {
           *e = dist.ind_sample(rng) as f32;
@@ -725,7 +725,7 @@ impl<S> NewDiffOperator<S> for DeviceConv2dNoBiasOperator<S> {
     let in_buf = self.in_.buf.borrow();
     in_buf.as_ref().wait(&self.stream.conn());
     self.weights.as_view().wait(&self.stream.conn());
-    self.bias.as_view().wait(&self.stream.conn());
+    //self.bias.as_view().wait(&self.stream.conn());
     self.tmp_buf.as_ref().wait(&self.stream.conn());
     self.scratch.as_ref().wait(&self.stream.conn());
     self.fwd.set_batch_size(batch_size).unwrap();
@@ -751,7 +751,7 @@ impl<S> NewDiffOperator<S> for DeviceConv2dNoBiasOperator<S> {
     ).unwrap() };*/
     in_buf.as_ref().post(&self.stream.conn());
     self.weights.as_view().post(&self.stream.conn());
-    self.bias.as_view().post(&self.stream.conn());
+    //self.bias.as_view().post(&self.stream.conn());
     self.tmp_buf.as_ref().post(&self.stream.conn());
     self.scratch.as_ref().post(&self.stream.conn());
 
@@ -769,7 +769,7 @@ impl<S> NewDiffOperator<S> for DeviceConv2dNoBiasOperator<S> {
     in_buf.as_ref().wait(&self.stream.conn());
     self.tmp_grad.as_ref().wait(&self.stream.conn());
     self.w_grad.as_view().wait(&self.stream.conn());
-    self.b_grad.as_view().wait(&self.stream.conn());
+    //self.b_grad.as_view().wait(&self.stream.conn());
     self.scratch.as_ref().wait(&self.stream.conn());
     self.bwd_w.set_batch_size(batch_size).unwrap();
     unsafe { self.bwd_w.backward_filter(
@@ -791,7 +791,7 @@ impl<S> NewDiffOperator<S> for DeviceConv2dNoBiasOperator<S> {
     in_buf.as_ref().post(&self.stream.conn());
     self.tmp_grad.as_ref().post(&self.stream.conn());
     self.w_grad.as_view().post(&self.stream.conn());
-    self.b_grad.as_view().post(&self.stream.conn());
+    //self.b_grad.as_view().post(&self.stream.conn());
     self.scratch.as_ref().post(&self.stream.conn());
 
     if let Some(ref in_grad) = self.in_.grad.as_ref() {
@@ -816,7 +816,7 @@ impl<S> NewDiffOperator<S> for DeviceConv2dNoBiasOperator<S> {
       self.scratch.as_ref().post(&self.stream.conn());
     }
   }
-}
+}*/
 
 pub struct DeviceBatchNormConv2dOperator<S> {
   cfg:      BatchNormConv2dOperatorConfig,
@@ -961,7 +961,8 @@ impl<S> NewDiffOperator<S> for DeviceBatchNormConv2dOperator<S> {
         }
       }
       ParamInitKind::Xavier => {
-        let half_range = (6.0 / (self.cfg.in_dim.2 + self.cfg.out_chan) as f64).sqrt();
+        //let half_range = (6.0 / (self.cfg.in_dim.2 + self.cfg.out_chan) as f64).sqrt();
+        let half_range = (3.0 / (self.cfg.kernel_w * self.cfg.kernel_h * self.cfg.in_dim.2) as f64).sqrt();
         let dist = Range::new(-half_range, half_range);
         for e in self.hweights.as_mut_slice().iter_mut() {
           *e = dist.ind_sample(rng) as f32;
