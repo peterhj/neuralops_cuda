@@ -46,6 +46,36 @@ extern "C" {
       in_grad: *mut f32,
       stream: cudaStream_t);
 
+  pub fn neuralops_cuda_caffe_im2col(
+      data_im: *const f32,
+      channels: c_int,
+      height: c_int,
+      width: c_int,
+      kernel_h: c_int,
+      kernel_w: c_int,
+      pad_h: c_int,
+      pad_w: c_int,
+      stride_h: c_int,
+      stride_w: c_int,
+      dilation_h: c_int,
+      dilation_w: c_int,
+      data_col: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_caffe_col2im(
+      data_col: *const f32,
+      channels: c_int,
+      height: c_int,
+      width: c_int,
+      kernel_h: c_int,
+      kernel_w: c_int,
+      pad_h: c_int,
+      pad_w: c_int,
+      stride_h: c_int,
+      stride_w: c_int,
+      dilation_h: c_int,
+      dilation_w: c_int,
+      data_im: *mut f32,
+      stream: cudaStream_t);
   pub fn neuralops_cuda_conv2d_whiten_fwd(
       in_buf: *const f32,
       spatial_dim: size_t,
@@ -136,6 +166,25 @@ extern "C" {
       len: size_t,
       batch_size: size_t,
       scalars: *const f32,
+      stream: cudaStream_t);
+
+  pub fn neuralops_cuda_caffe_avgpool2d_fwd(
+      bottom_data: *const f32,
+      num: c_int, channels: c_int, height: c_int, width: c_int,
+      pool_h: c_int, pool_w: c_int,
+      kernel_h: c_int, kernel_w: c_int,
+      pad_h: c_int, pad_w: c_int,
+      stride_h: c_int, stride_w: c_int,
+      top_data: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_caffe_avgpool2d_bwd(
+      top_diff: *const f32,
+      num: c_int, channels: c_int, height: c_int, width: c_int,
+      pool_h: c_int, pool_w: c_int,
+      kernel_h: c_int, kernel_w: c_int,
+      pad_h: c_int, pad_w: c_int,
+      stride_h: c_int, stride_w: c_int,
+      bottom_diff: *mut f32,
       stream: cudaStream_t);
 
   pub fn neuralops_cuda_blockreduce_max_argmax(

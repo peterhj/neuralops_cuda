@@ -27,3 +27,4 @@ pub mod prelude;
 pub mod regress_loss;
 pub mod softmax;
 pub mod split;
+pub mod util;

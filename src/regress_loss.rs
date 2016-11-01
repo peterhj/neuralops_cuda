@@ -41,8 +41,9 @@ pub struct DeviceIndLstSqRegressLoss<S> {
   //ts_h:     Vec<f32>,
   //hats_h:   Vec<u32>,
   preds_h:  Vec<f32>,
+  delta_h:  Vec<f32>,
   losses_h: Vec<f32>,
-  softmax:  DeviceSoftmaxKernel,
+  //softmax:  DeviceSoftmaxKernel,
 }
 
 impl<S> DeviceIndLstSqRegressLoss<S> {
@@ -64,6 +65,8 @@ impl<S> DeviceIndLstSqRegressLoss<S> {
     //hats_h.resize(cfg.batch_sz, 0);
     let mut preds_h = Vec::with_capacity(cfg.batch_sz * cfg.index_sz);
     preds_h.resize(cfg.batch_sz * cfg.index_sz, 0.0);
+    let mut delta_h = Vec::with_capacity(cfg.batch_sz * cfg.index_sz);
+    delta_h.resize(cfg.batch_sz * cfg.index_sz, 0.0);
     let mut losses_h = Vec::with_capacity(cfg.batch_sz);
     losses_h.resize(cfg.batch_sz, 0.0);
     Rc::new(RefCell::new(DeviceIndLstSqRegressLoss{
@@ -91,8 +94,9 @@ impl<S> DeviceIndLstSqRegressLoss<S> {
       //ts_h:     ts_h,
       //hats_h:   hats_h,
       preds_h:  preds_h,
+      delta_h:  delta_h,
       losses_h: losses_h,
-      softmax:  DeviceSoftmaxKernel::new(cfg.batch_sz, cfg.index_sz, stream.conn()),
+      //softmax:  DeviceSoftmaxKernel::new(cfg.batch_sz, cfg.index_sz, stream.conn()),
     }))
   }
 }
@@ -242,12 +246,12 @@ impl NewDiffOperator<SampleItem> for DeviceIndLstSqRegressLoss<SampleItem> {
           in_grad.as_mut().as_mut_ptr(),
           self.stream.conn().raw_stream().ptr,
       ) };
-      if let Some(diff_clip) = self.cfg.max_diff {
+      if let Some(grad_clip) = self.cfg.grad_clip {
         unsafe { neuralops_cuda_clamp(
             in_grad.as_mut().as_mut_ptr(),
             self.cfg.index_sz * batch_size,
-            -diff_clip,
-            diff_clip,
+            -grad_clip,
+            grad_clip,
             self.stream.conn().raw_stream().ptr,
         ) };
       }
@@ -256,6 +260,8 @@ impl NewDiffOperator<SampleItem> for DeviceIndLstSqRegressLoss<SampleItem> {
       self.labels.as_ref().post(&self.stream.conn());
       self.weights.as_ref().post(&self.stream.conn());
       in_grad.as_ref().post(&self.stream.conn());
+
+      in_grad.as_ref().store_sync(&mut self.delta_h, self.stream.conn());
     }
   }
 }
@@ -278,6 +284,14 @@ impl DiffLoss<SampleItem> for DeviceIndLstSqRegressLoss<SampleItem> {
 
   fn _get_pred(&mut self) -> &[f32] {
     &self.preds_h
+  }
+
+  fn _get_target(&mut self) -> &[f32] {
+    &self.htargets
+  }
+
+  fn _get_delta(&mut self) -> &[f32] {
+    &self.delta_h
   }
 }
 

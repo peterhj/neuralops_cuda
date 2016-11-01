@@ -45,6 +45,7 @@ fn main() {
     batch_sz:   batch_sz,
     in_dim:     784,
     out_dim:    50,
+    bias:       true,
     act_kind:   ActivationKind::Rect,
     w_init:     ParamInitKind::Kaiming,
   }, OpCapability::Backward, input, 0);
@@ -52,6 +53,7 @@ fn main() {
     batch_sz:   batch_sz,
     in_dim:     50,
     out_dim:    10,
+    bias:       true,
     act_kind:   ActivationKind::Identity,
     w_init:     ParamInitKind::Kaiming,
   }, OpCapability::Backward, affine1, 0);

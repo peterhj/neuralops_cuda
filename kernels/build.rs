@@ -19,6 +19,7 @@ fn main() {
     .file("interpolate.cu")
     .file("lstsq.cu")
     .file("map.cu")
+    .file("pool.cu")
     .file("reduce.cu")
     .file("softmax.cu")
     .compile("libneuralops_cuda_kernels.a");

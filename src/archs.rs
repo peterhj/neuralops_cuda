@@ -98,6 +98,7 @@ pub fn build_cifar10_resnet20_loss(batch_sz: usize, augment: bool, stream: Devic
     batch_sz:   batch_sz,
     in_dim:     64,
     out_dim:    10,
+    bias:       true,
     act_kind:   ActivationKind::Identity,
     w_init:     ParamInitKind::Kaiming,
   };
@@ -205,6 +206,7 @@ pub fn build_cifar10_resnet56_loss(batch_sz: usize, stream: DeviceStream) -> Rc<
     batch_sz:   batch_sz,
     in_dim:     64,
     out_dim:    10,
+    bias:       true,
     act_kind:   ActivationKind::Identity,
     w_init:     ParamInitKind::Kaiming,
   };
@@ -358,6 +360,7 @@ pub fn build_imagenet_resnet18_loss(batch_sz: usize, stream: DeviceStream) -> Rc
     batch_sz:   batch_sz,
     in_dim:     512,
     out_dim:    1000,
+    bias:       true,
     act_kind:   ActivationKind::Identity,
     w_init:     ParamInitKind::Xavier,
     //w_init:     ParamInitKind::Kaiming,

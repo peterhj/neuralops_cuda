@@ -369,6 +369,15 @@ impl NewDiffOperator<SampleItem> for DeviceVarInputOperator<SampleItem> {
               .scale(scale, self.stream.conn());
           }
         }
+        &VarInputPreproc::DivScale{scale} => {
+          for idx in 0 .. batch_size {
+            let dim = self.tmp_dims[idx];
+            out_buf.as_mut()
+              .slice_mut(idx * self.cfg.max_stride, (idx+1) * self.cfg.max_stride)
+              .reshape_mut(dim.flat_len())
+              .div_scalar(scale, self.stream.conn());
+          }
+        }
         &VarInputPreproc::ChannelShift{ref shift} => {
           for idx in 0 .. batch_size {
             let dim = self.tmp_dims[idx];
@@ -448,8 +457,6 @@ impl NewDiffOperator<SampleItem> for DeviceVarInputOperator<SampleItem> {
           if phases.contains(&phase) {
             for idx in 0 .. batch_size {
               let in_dim = self.tmp_dims[idx];
-              assert!(crop_w <= in_dim.0);
-              assert!(crop_h <= in_dim.1);
               let out_dim = (crop_w, crop_h, in_dim.2);
               let out_len = out_dim.flat_len();
               {

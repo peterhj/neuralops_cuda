@@ -51,8 +51,9 @@ __global__ void ind_lst_sq_bwd_kernel(
   uint32_t batch_idx = idx / dim;
   if (j < dim && batch_idx < batch_sz) {
     if (j == labels[batch_idx]) {
-      grad[idx] = weights[batch_idx] * (x[idx] - targets[batch_idx]);
+      grad[idx] = x[idx] - targets[batch_idx];
     } else {
+      //grad[idx] = x[idx];
       grad[idx] = 0.0f;
     }
   }

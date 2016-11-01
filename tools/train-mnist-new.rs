@@ -59,6 +59,7 @@ fn main() {
     stride_w:   2,  stride_h:   2,
     pad_w:      2,  pad_h:      2,
     out_chan:   16,
+    bias:       true,
     //avg_rate:   0.05,
     //epsilon:    1.0e-6,
     act_kind:   ActivationKind::Rect,
@@ -72,6 +73,7 @@ fn main() {
     stride_w:   1,  stride_h:   1,
     pad_w:      1,  pad_h:      1,
     out_chan:   32,
+    bias:       true,
     //avg_rate:   0.05,
     //epsilon:    1.0e-6,
     act_kind:   ActivationKind::Rect,
@@ -81,6 +83,7 @@ fn main() {
     batch_sz:   batch_sz,
     in_dim:     14 * 14 * 32,
     out_dim:    10,
+    bias:       true,
     act_kind:   ActivationKind::Identity,
     w_init:     ParamInitKind::Kaiming,
   }, OpCapability::Backward, conv2, 0, stream.clone());
