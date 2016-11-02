@@ -1,4 +1,4 @@
-use prelude::*;
+/*use prelude::*;
 use activate::{DeviceActivateKernel};
 use kernels::*;
 
@@ -63,5 +63,4 @@ pub struct DeviceBatchNormConvTranspose2dOperator<S> {
   bnorm_k:  DeviceConv2dBatchNormKernel,
   scale_k:  DeviceConv2dScaleKernel,
   act_kern: DeviceActivateKernel,
-}
-
+}*/

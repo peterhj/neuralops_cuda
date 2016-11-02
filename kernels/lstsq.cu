@@ -16,7 +16,8 @@ __global__ void ind_lst_sq_fwd_kernel(
     if (label_k < dim) {
       uint32_t idx = label_k + dim * batch_idx;
       float dx = x[idx] - targets[batch_idx];
-      loss[batch_idx] = 0.5f * weights[batch_idx] * dx * dx;
+      //loss[batch_idx] = 0.5f * weights[batch_idx] * dx * dx;
+      loss[batch_idx] = 0.5f * dx * dx;
     } else {
       loss[batch_idx] = 0.0f;
     }
@@ -47,13 +48,12 @@ __global__ void ind_lst_sq_bwd_kernel(
     float *grad)
 {
   uint32_t idx = threadIdx.x + blockIdx.x * blockDim.x;
-  uint32_t j = idx % dim;
+  uint32_t k = idx % dim;
   uint32_t batch_idx = idx / dim;
-  if (j < dim && batch_idx < batch_sz) {
-    if (j == labels[batch_idx]) {
+  if (k < dim && batch_idx < batch_sz) {
+    if (k == labels[batch_idx]) {
       grad[idx] = x[idx] - targets[batch_idx];
     } else {
-      //grad[idx] = x[idx];
       grad[idx] = 0.0f;
     }
   }

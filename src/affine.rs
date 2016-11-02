@@ -1,5 +1,6 @@
 use prelude::*;
 use activate::{DeviceActivateKernel};
+use kernels::*;
 
 use densearray::prelude::*;
 use devicemem_cuda::prelude::*;
@@ -15,10 +16,11 @@ use std::cell::{RefCell};
 //use std::cmp::{max};
 //use std::marker::{PhantomData};
 use std::rc::{Rc};
+use std::slice::{from_raw_parts_mut};
 
 pub struct DeviceAffineOperator<S> {
   cfg:      AffineOperatorConfig,
-  name:     String,
+  //name:     String,
   node:     OperatorNode,
   stream:   DeviceStream,
   in_op:    Rc<RefCell<NewDiffOperator<S, IoBuf=[f32]>>>,
@@ -37,32 +39,34 @@ pub struct DeviceAffineOperator<S> {
 
 impl<S> DeviceAffineOperator<S> {
   pub fn new<InOp>(cfg: AffineOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceAffineOperator<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
-    let out_len = cfg.batch_sz * cfg.out_dim;
     let in_ = prev_op.borrow()._output(prev_arm);
     let out = DeviceOutput::new(cfg.batch_sz, cfg.out_dim, cap, stream.conn());
     Rc::new(RefCell::new(DeviceAffineOperator{
       cfg:      cfg,
-      name:     String::new(),
+      //name:     String::new(),
       node:     OperatorNode::default(),
       stream:   stream.clone(),
       in_op:    prev_op,
       in_:      in_,
       out:      out,
-      hweights: Array2d::zeros((cfg.in_dim, cfg.out_dim)),
+      hweights: Array2d::zeros((cfg.out_dim, cfg.in_dim)),
+      //hweights: Array2d::zeros((cfg.in_dim, cfg.out_dim)),
       hbias:    Array1d::zeros(cfg.out_dim),
-      weights:  DeviceArray2d::zeros((cfg.in_dim, cfg.out_dim), stream.conn()),
-      w_grad:   DeviceArray2d::zeros((cfg.in_dim, cfg.out_dim), stream.conn()),
+      weights:  DeviceArray2d::zeros((cfg.out_dim, cfg.in_dim), stream.conn()),
+      w_grad:   DeviceArray2d::zeros((cfg.out_dim, cfg.in_dim), stream.conn()),
+      //weights:  DeviceArray2d::zeros((cfg.in_dim, cfg.out_dim), stream.conn()),
+      //w_grad:   DeviceArray2d::zeros((cfg.in_dim, cfg.out_dim), stream.conn()),
       bias:     DeviceArray1d::zeros(cfg.out_dim, stream.conn()),
       b_grad:   DeviceArray1d::zeros(cfg.out_dim, stream.conn()),
-      tmp_buf:  DeviceMem::zeros(out_len, stream.conn()),
-      tmp_grad: DeviceMem::zeros(out_len, stream.conn()),
+      tmp_buf:  DeviceMem::zeros(cfg.batch_sz * cfg.out_dim, stream.conn()),
+      tmp_grad: DeviceMem::zeros(cfg.batch_sz * cfg.out_dim, stream.conn()),
       act_kern: DeviceActivateKernel::new(cfg.out_dim, cfg.act_kind),
     }))
   }
 
-  pub fn set_name(&mut self, name: &str) {
+  /*pub fn set_name(&mut self, name: &str) {
     self.name = String::from(name);
-  }
+  }*/
 }
 
 impl<S> Operator for DeviceAffineOperator<S> {
@@ -79,6 +83,49 @@ impl<S> DeviceOperator for DeviceAffineOperator<S> {
   fn _output(&self, arm: usize) -> DeviceOutput {
     assert_eq!(0, arm);
     self.out.clone()
+  }
+}
+
+impl<S> DiffOperatorRma<S, DeviceMem<f32>> for DeviceAffineOperator<S> {
+  type Ctx = DeviceStream;
+
+  fn _rma_load_diff_param(&mut self, init_offset: usize, param_reader: &mut DeviceMem<f32>, stream: DeviceStream) -> usize {
+    let mut offset = init_offset;
+    let w_len = self.weights.dim().flat_len();
+    let b_len = self.bias.dim().flat_len();
+    self.weights.as_view_mut().reshape_mut(w_len)
+      .copy(param_reader.as_ref().slice(offset, offset + w_len).reshape(w_len), stream.conn());
+    offset += w_len;
+    self.bias.as_view_mut()
+      .copy(param_reader.as_ref().slice(offset, offset + b_len).reshape(b_len), stream.conn());
+    offset += b_len;
+    offset - init_offset
+  }
+
+  fn _rma_store_diff_param(&mut self, init_offset: usize, param_writer: &mut DeviceMem<f32>, stream: DeviceStream) -> usize {
+    let mut offset = init_offset;
+    let w_len = self.weights.dim().flat_len();
+    let b_len = self.bias.dim().flat_len();
+    param_writer.as_mut().slice_mut(offset, offset + w_len).reshape_mut(w_len)
+      .copy(self.weights.as_view().reshape(w_len), stream.conn());
+    offset += w_len;
+    param_writer.as_mut().slice_mut(offset, offset + b_len).reshape_mut(b_len)
+      .copy(self.bias.as_view(), stream.conn());
+    offset += b_len;
+    offset - init_offset
+  }
+
+  fn _rma_store_grad(&mut self, init_offset: usize, grad_writer: &mut DeviceMem<f32>, stream: DeviceStream) -> usize {
+    let mut offset = init_offset;
+    let w_len = self.weights.dim().flat_len();
+    let b_len = self.bias.dim().flat_len();
+    grad_writer.as_mut().slice_mut(offset, offset + w_len).reshape_mut(w_len)
+      .copy(self.w_grad.as_view().reshape(w_len), stream.conn());
+    offset += w_len;
+    grad_writer.as_mut().slice_mut(offset, offset + b_len).reshape_mut(b_len)
+      .copy(self.b_grad.as_view(), stream.conn());
+    offset += b_len;
+    offset - init_offset
   }
 }
 
@@ -186,13 +233,14 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
     self.tmp_buf.as_mut().reshape_mut((self.cfg.out_dim, batch_size))
       .matrix_prod(
           1.0,
-          self.weights.as_view(), Transpose::T,
+          self.weights.as_view(), Transpose::N,
+          //self.weights.as_view(), Transpose::T,
           in_buf.as_ref().reshape((self.cfg.in_dim, batch_size)), Transpose::N,
           0.0,
           self.stream.conn(),
       );
     if self.cfg.bias {
-      for j in 0 .. batch_size {
+      /*for j in 0 .. batch_size {
         self.tmp_buf.as_mut().reshape_mut((self.cfg.out_dim, batch_size))
           .view_mut((0, j), (self.cfg.out_dim, j+1))
           .matrix_add(
@@ -200,7 +248,18 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
               self.bias.as_view().reshape((self.cfg.out_dim, 1)),
               self.stream.conn(),
           );
-      }
+      }*/
+      self.tmp_buf.as_ref().wait(&self.stream.conn());
+      self.bias.as_view().wait(&self.stream.conn());
+      unsafe { neuralops_cuda_linear_bias_fwd_inplace(
+          self.tmp_buf.as_mut().as_mut_ptr(),
+          self.cfg.out_dim,
+          batch_size,
+          self.bias.as_view().as_ptr(),
+          self.stream.conn().raw_stream().ptr,
+      ) };
+      self.tmp_buf.as_ref().post(&self.stream.conn());
+      self.bias.as_view().post(&self.stream.conn());
     }
 
     let mut out_buf = self.out.buf.borrow_mut();
@@ -217,13 +276,15 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
     self.w_grad.as_view_mut()
       .matrix_prod(
           1.0,
-          in_buf.as_ref().reshape((self.cfg.in_dim, batch_size)), Transpose::N,
-          self.tmp_grad.as_ref().reshape((self.cfg.out_dim, batch_size)), Transpose::T,
+          self.tmp_grad.as_ref().reshape((self.cfg.out_dim, batch_size)), Transpose::N,
+          in_buf.as_ref().reshape((self.cfg.in_dim, batch_size)), Transpose::T,
+          //in_buf.as_ref().reshape((self.cfg.in_dim, batch_size)), Transpose::N,
+          //self.tmp_grad.as_ref().reshape((self.cfg.out_dim, batch_size)), Transpose::T,
           1.0,
           self.stream.conn(),
       );
     if self.cfg.bias {
-      for j in 0 .. batch_size {
+      /*for j in 0 .. batch_size {
         self.b_grad.as_view_mut().reshape_mut((self.cfg.out_dim, 1))
           .matrix_add(
               1.0,
@@ -231,7 +292,18 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
                 .view((0, j), (self.cfg.out_dim, j+1)),
               self.stream.conn(),
           );
-      }
+      }*/
+      self.tmp_grad.as_ref().wait(&self.stream.conn());
+      self.b_grad.as_view().wait(&self.stream.conn());
+      unsafe { neuralops_cuda_linear_bias_bwd(
+          self.tmp_grad.as_ref().as_ptr(),
+          self.cfg.out_dim,
+          batch_size,
+          self.b_grad.as_view_mut().as_mut_ptr(),
+          self.stream.conn().raw_stream().ptr,
+      ) };
+      self.tmp_grad.as_ref().post(&self.stream.conn());
+      self.b_grad.as_view().post(&self.stream.conn());
     }
 
     if let Some(in_grad) = self.in_.grad.as_ref() {
@@ -239,11 +311,34 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
       in_grad.as_mut().reshape_mut((self.cfg.in_dim, batch_size))
         .matrix_prod(
             1.0,
-            self.weights.as_view(), Transpose::N,
+            self.weights.as_view(), Transpose::T,
+            //self.weights.as_view(), Transpose::N,
             self.tmp_grad.as_ref().reshape((self.cfg.out_dim, batch_size)), Transpose::N,
             0.0,
             self.stream.conn(),
         );
     }
+  }
+
+  fn _dump_input(&mut self) -> Vec<u8> {
+    let input_sz = self.cfg.batch_sz * self.cfg.in_dim * 4;
+    let mut input_data = Vec::with_capacity(input_sz);
+    input_data.resize(input_sz, 0);
+    {
+      let mut input_h = unsafe { from_raw_parts_mut(input_data.as_mut_ptr() as *mut f32, input_data.len() / 4) };
+      self.in_.buf.borrow().as_ref().store_sync(&mut input_h, self.stream.conn());
+    }
+    input_data
+  }
+
+  fn _dump_output(&mut self) -> Vec<u8> {
+    let output_sz = self.cfg.batch_sz * self.cfg.out_dim * 4;
+    let mut output_data = Vec::with_capacity(output_sz);
+    output_data.resize(output_sz, 0);
+    {
+      let mut output_h = unsafe { from_raw_parts_mut(output_data.as_mut_ptr() as *mut f32, output_data.len() / 4) };
+      self.tmp_buf.as_ref().store_sync(&mut output_h, self.stream.conn());
+    }
+    output_data
   }
 }

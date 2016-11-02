@@ -3,8 +3,8 @@ use activate::{DeviceActivateKernel};
 use kernels::*;
 //use util::*;
 
-use cuda_dnn::v5::{CudnnPoolingOp, CudnnTensorDesc};
-use cuda_dnn::v5::ffi::*;
+use cuda_dnn::v4::{CudnnPoolingOp, CudnnTensorLayout, CudnnTensorDesc};
+use cuda_dnn::v4::ffi::*;
 use densearray::prelude::*;
 use devicemem_cuda::prelude::*;
 use neuralops::prelude::*;
@@ -159,10 +159,10 @@ impl<S> DevicePool2dOperator<S> {
     let mut h_out = Vec::with_capacity(cfg.batch_sz * cfg.out_dim().flat_len());
     h_out.resize(cfg.batch_sz * cfg.out_dim().flat_len(), 0.0);
     let pooling = match CudnnPoolingOp::create_2d(
-        CudnnTensorDesc::<f32>::create_4d(in_w, in_h, chan, cfg.batch_sz).unwrap(),
-        CudnnTensorDesc::<f32>::create_4d(in_w, in_h, chan, cfg.batch_sz).unwrap(),
-        CudnnTensorDesc::<f32>::create_4d(out_w, out_h, chan, cfg.batch_sz).unwrap(),
-        CudnnTensorDesc::<f32>::create_4d(out_w, out_h, chan, cfg.batch_sz).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, in_w, in_h, chan, cfg.batch_sz).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, in_w, in_h, chan, cfg.batch_sz).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, out_w, out_h, chan, cfg.batch_sz).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, out_w, out_h, chan, cfg.batch_sz).unwrap(),
         cfg.pool_w,   cfg.pool_h,
         cfg.stride_w, cfg.stride_h,
         cfg.pad_w,    cfg.pad_h,

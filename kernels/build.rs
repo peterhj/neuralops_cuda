@@ -9,6 +9,8 @@ fn main() {
     .flag("-arch=sm_52")
     /*.flag("-Xcompiler")
     .flag("\'-fPIC\'")*/
+    .flag("-prec-div=true")
+    .flag("-prec-sqrt=true")
     .pic(true)
     .include("/usr/local/cuda/include")
     .file("activate.cu")
@@ -17,6 +19,7 @@ fn main() {
     .file("conv_batchnorm.cu")
     .file("image.cu")
     .file("interpolate.cu")
+    .file("linear.cu")
     .file("lstsq.cu")
     .file("map.cu")
     .file("pool.cu")

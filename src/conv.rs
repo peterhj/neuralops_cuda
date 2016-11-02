@@ -2,8 +2,8 @@ use prelude::*;
 use activate::{DeviceActivateKernel};
 use kernels::*;
 
-use cuda_dnn::v5::{CudnnTensorDesc, CudnnFilterDesc, CudnnConvDesc, CudnnAddOp, CudnnConvFwdOp, CudnnConvBwdFilterOp, CudnnConvBwdDataOp};
-use cuda_dnn::v5::ffi::*;
+use cuda_dnn::v4::{CudnnTensorLayout, CudnnTensorDesc, CudnnFilterDesc, CudnnConvDesc, CudnnAddOp, CudnnConvFwdOp, CudnnConvBwdFilterOp, CudnnConvBwdDataOp};
+use cuda_dnn::v4::ffi::*;
 use densearray::prelude::*;
 use devicemem_cuda::prelude::*;
 use neuralops::prelude::*;
@@ -17,6 +17,7 @@ use rand::distributions::range::{Range};
 use std::cell::{RefCell};
 use std::cmp::{max};
 use std::rc::{Rc};
+use std::slice::{from_raw_parts_mut};
 
 pub struct DeviceConv2dScaleKernel {
   pub dim:      (usize, usize, usize),
@@ -503,6 +504,13 @@ impl<S> NewDiffOperator<S> for DeviceGemmConv2dOperator<S> {
   }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct CudnnConv2dBackend {
+  pub fwd:      usize,
+  pub bwd_w:    usize,
+  pub bwd_d:    usize,
+}
+
 pub struct DeviceConv2dOperator<S> {
   cfg:      Conv2dOperatorConfig,
   name:     String,
@@ -528,17 +536,17 @@ pub struct DeviceConv2dOperator<S> {
 }
 
 impl<S> DeviceConv2dOperator<S> {
-  pub fn new<InOp>(cfg: Conv2dOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceConv2dOperator<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
+  pub fn new<InOp>(cfg: Conv2dOperatorConfig, /*backend: Option<CudnnConv2dBackend>,*/ cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceConv2dOperator<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
     println!("DEBUG: conv2d: {:?}", cfg);
     let (in_w, in_h, in_chan) = cfg.in_dim;
     let (out_w, out_h, out_chan) = cfg.out_dim();
-    let mut check_out_w: i32 = 0;
+    /*let mut check_out_w: i32 = 0;
     let mut check_out_h: i32 = 0;
     let mut check_out_chan: i32 = 0;
     let mut check_batch_sz: i32 = 0;
     let status = unsafe { cudnnGetConvolution2dForwardOutputDim(
         CudnnConvDesc::create_2d(cfg.stride_w, cfg.stride_h, cfg.pad_w, cfg.pad_h).unwrap().ptr,
-        CudnnTensorDesc::<f32>::create_4d(in_w, in_h, in_chan, cfg.batch_sz).unwrap().ptr,
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, in_w, in_h, in_chan, cfg.batch_sz).unwrap().ptr,
         CudnnFilterDesc::<f32>::create_4d(cfg.kernel_w, cfg.kernel_h, in_chan, out_chan).unwrap().ptr,
         &mut check_batch_sz as *mut _,
         &mut check_out_chan as *mut _,
@@ -549,44 +557,49 @@ impl<S> DeviceConv2dOperator<S> {
     assert_eq!(out_w, check_out_w as usize);
     assert_eq!(out_h, check_out_h as usize);
     assert_eq!(out_chan, check_out_chan as usize);
-    assert_eq!(cfg.batch_sz, check_batch_sz as usize);
+    assert_eq!(cfg.batch_sz, check_batch_sz as usize);*/
     let mut workspace_size = 0;
-    let add_bias = CudnnAddOp::new(
-        CudnnTensorDesc::<f32>::create_4d(1, 1, out_chan, 1).unwrap(),
-        CudnnTensorDesc::<f32>::create_4d(out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
-    );
     let fwd = CudnnConvFwdOp::create_fastest(
-    //let fwd = CudnnConvFwdOp::create_algo(
-    //    cudnnConvolutionFwdAlgo_t::ImplicitPrecompGemm,
-        CudnnTensorDesc::<f32>::create_4d(in_w, in_h, in_chan, cfg.batch_sz).unwrap(),
+    /*let fwd = CudnnConvFwdOp::create_algo(
+        match backend.unwrap().fwd {
+          0 => cudnnConvolutionFwdAlgo_t::ImplicitGemm,
+          1 => cudnnConvolutionFwdAlgo_t::ImplicitPrecompGemm,
+          2 => cudnnConvolutionFwdAlgo_t::Gemm,
+          _ => unimplemented!(),
+        },*/
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, in_w, in_h, in_chan, cfg.batch_sz).unwrap(),
         CudnnFilterDesc::<f32>::create_4d(cfg.kernel_w, cfg.kernel_h, in_chan, out_chan).unwrap(),
         CudnnConvDesc::create_2d(cfg.stride_w, cfg.stride_h, cfg.pad_w, cfg.pad_h).unwrap(),
-        CudnnTensorDesc::<f32>::create_4d(out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
         &*stream.conn().cudnn(),
     ).unwrap();
     workspace_size = max(workspace_size, fwd.work_size);
     let bwd_w = CudnnConvBwdFilterOp::create_fastest(
     //let bwd_w = CudnnConvBwdFilterOp::create_algo(
-    //    cudnnConvolutionBwdFilterAlgo_t::Deterministic,
-        CudnnTensorDesc::<f32>::create_4d(in_w, in_h, in_chan, cfg.batch_sz).unwrap(),
-        CudnnTensorDesc::<f32>::create_4d(out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
+    //    cudnnConvolutionBwdFilterAlgo_t::NonDeterministic,
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, in_w, in_h, in_chan, cfg.batch_sz).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
         CudnnConvDesc::create_2d(cfg.stride_w, cfg.stride_h, cfg.pad_w, cfg.pad_h).unwrap(),
         CudnnFilterDesc::<f32>::create_4d(cfg.kernel_w, cfg.kernel_h, in_chan, out_chan).unwrap(),
-        CudnnTensorDesc::<f32>::create_4d(1, 1, out_chan, 1).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, 1, 1, out_chan, 1).unwrap(),
         &*stream.conn().cudnn(),
     ).unwrap();
     workspace_size = max(workspace_size, bwd_w.work_size);
     let bwd_d = CudnnConvBwdDataOp::create_fastest(
     //let bwd_d = CudnnConvBwdDataOp::create_algo(
-    //    cudnnConvolutionBwdDataAlgo_t::Deterministic,
+    //    cudnnConvolutionBwdDataAlgo_t::NonDeterministic,
         CudnnFilterDesc::<f32>::create_4d(cfg.kernel_w, cfg.kernel_h, in_chan, out_chan).unwrap(),
-        CudnnTensorDesc::<f32>::create_4d(out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
         CudnnConvDesc::create_2d(cfg.stride_w, cfg.stride_h, cfg.pad_w, cfg.pad_h).unwrap(),
-        CudnnTensorDesc::<f32>::create_4d(in_w, in_h, in_chan, cfg.batch_sz).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, in_w, in_h, in_chan, cfg.batch_sz).unwrap(),
         &*stream.conn().cudnn(),
     ).unwrap();
     workspace_size = max(workspace_size, bwd_d.work_size);
     println!("DEBUG: conv2d: workspace size in bytes: {}", workspace_size);
+    let add_bias = CudnnAddOp::new(
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, 1, 1, out_chan, 1).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
+    );
     let in_ = prev_op.borrow()._output(prev_arm);
     Rc::new(RefCell::new(DeviceConv2dOperator{
       cfg:      cfg,
@@ -632,6 +645,49 @@ impl<S> DeviceOperator for DeviceConv2dOperator<S> {
   fn _output(&self, arm: usize) -> DeviceOutput {
     assert_eq!(0, arm);
     self.out.clone()
+  }
+}
+
+impl<S> DiffOperatorRma<S, DeviceMem<f32>> for DeviceConv2dOperator<S> {
+  type Ctx = DeviceStream;
+
+  fn _rma_load_diff_param(&mut self, init_offset: usize, param_reader: &mut DeviceMem<f32>, stream: DeviceStream) -> usize {
+    let mut offset = init_offset;
+    let w_len = self.weights.dim().flat_len();
+    let b_len = self.bias.dim().flat_len();
+    self.weights.as_view_mut().reshape_mut(w_len)
+      .copy(param_reader.as_ref().slice(offset, offset + w_len).reshape(w_len), stream.conn());
+    offset += w_len;
+    self.bias.as_view_mut()
+      .copy(param_reader.as_ref().slice(offset, offset + b_len).reshape(b_len), stream.conn());
+    offset += b_len;
+    offset - init_offset
+  }
+
+  fn _rma_store_diff_param(&mut self, init_offset: usize, param_writer: &mut DeviceMem<f32>, stream: DeviceStream) -> usize {
+    let mut offset = init_offset;
+    let w_len = self.weights.dim().flat_len();
+    let b_len = self.bias.dim().flat_len();
+    param_writer.as_mut().slice_mut(offset, offset + w_len).reshape_mut(w_len)
+      .copy(self.weights.as_view().reshape(w_len), stream.conn());
+    offset += w_len;
+    param_writer.as_mut().slice_mut(offset, offset + b_len).reshape_mut(b_len)
+      .copy(self.bias.as_view(), stream.conn());
+    offset += b_len;
+    offset - init_offset
+  }
+
+  fn _rma_store_grad(&mut self, init_offset: usize, grad_writer: &mut DeviceMem<f32>, stream: DeviceStream) -> usize {
+    let mut offset = init_offset;
+    let w_len = self.weights.dim().flat_len();
+    let b_len = self.bias.dim().flat_len();
+    grad_writer.as_mut().slice_mut(offset, offset + w_len).reshape_mut(w_len)
+      .copy(self.w_grad.as_view().reshape(w_len), stream.conn());
+    offset += w_len;
+    grad_writer.as_mut().slice_mut(offset, offset + b_len).reshape_mut(b_len)
+      .copy(self.b_grad.as_view(), stream.conn());
+    offset += b_len;
+    offset - init_offset
   }
 }
 
@@ -699,19 +755,27 @@ impl<S> NewDiffOperator<S> for DeviceConv2dOperator<S> {
 
   fn _load_diff_param(&mut self, init_offset: usize, param_reader: &mut [f32]) -> usize {
     let mut offset = init_offset;
-    offset += param_reader.read_buf(offset, self.hweights.as_mut_slice());
+    /*offset += param_reader.read_buf(offset, self.hweights.as_mut_slice());
     offset += param_reader.read_buf(offset, self.hbias.as_mut_slice());
     self.weights.as_view_mut().load_sync(self.hweights.as_view(), self.stream.conn());
-    self.bias.as_view_mut().load_sync(self.hbias.as_view(), self.stream.conn());
+    self.bias.as_view_mut().load_sync(self.hbias.as_view(), self.stream.conn());*/
+    self.weights.as_view_mut().load_sync(param_reader[offset .. ].reshape((self.cfg.kernel_w, self.cfg.kernel_h, self.cfg.in_dim.2, self.cfg.out_chan)), self.stream.conn());
+    offset += self.cfg.kernel_w * self.cfg.kernel_h * self.cfg.in_dim.2 * self.cfg.out_chan;
+    self.bias.as_view_mut().load_sync(param_reader[offset .. ].reshape(self.cfg.out_chan), self.stream.conn());
+    offset += self.cfg.out_chan;
     offset - init_offset
   }
 
   fn _store_diff_param(&mut self, init_offset: usize, param_writer: &mut [f32]) -> usize {
-    self.weights.as_view().store_sync(self.hweights.as_view_mut(), self.stream.conn());
-    self.bias.as_view().store_sync(self.hbias.as_view_mut(), self.stream.conn());
     let mut offset = init_offset;
+    /*self.weights.as_view().store_sync(self.hweights.as_view_mut(), self.stream.conn());
+    self.bias.as_view().store_sync(self.hbias.as_view_mut(), self.stream.conn());
     offset += param_writer.write_buf(offset, self.hweights.as_slice());
-    offset += param_writer.write_buf(offset, self.hbias.as_slice());
+    offset += param_writer.write_buf(offset, self.hbias.as_slice());*/
+    self.weights.as_view().store_sync(param_writer[offset .. ].reshape_mut((self.cfg.kernel_w, self.cfg.kernel_h, self.cfg.in_dim.2, self.cfg.out_chan)), self.stream.conn());
+    offset += self.cfg.kernel_w * self.cfg.kernel_h * self.cfg.in_dim.2 * self.cfg.out_chan;
+    self.bias.as_view().store_sync(param_writer[offset .. ].reshape_mut(self.cfg.out_chan), self.stream.conn());
+    offset += self.cfg.out_chan;
     offset - init_offset
   }
 
@@ -790,7 +854,8 @@ impl<S> NewDiffOperator<S> for DeviceConv2dOperator<S> {
         1.0,
         in_buf.as_ref().as_ptr(),
         self.tmp_grad.as_ref().as_ptr(),
-        1.0,
+        0.0,
+        //1.0,
         self.w_grad.as_view_mut().as_mut_ptr(),
         self.scratch.as_mut().as_mut_ptr(),
         &*self.stream.conn().cudnn(),
@@ -799,7 +864,8 @@ impl<S> NewDiffOperator<S> for DeviceConv2dOperator<S> {
       unsafe { self.bwd_w.backward_bias(
           1.0,
           self.tmp_grad.as_ref().as_ptr(),
-          1.0,
+          0.0,
+          //1.0,
           self.b_grad.as_view_mut().as_mut_ptr(),
           &*self.stream.conn().cudnn(),
       ).unwrap() };
@@ -831,6 +897,28 @@ impl<S> NewDiffOperator<S> for DeviceConv2dOperator<S> {
       self.weights.as_view().post(&self.stream.conn());
       self.scratch.as_ref().post(&self.stream.conn());
     }
+  }
+
+  fn _dump_input(&mut self) -> Vec<u8> {
+    let input_sz = self.cfg.batch_sz * self.cfg.in_dim.flat_len() * 4;
+    let mut input_data = Vec::with_capacity(input_sz);
+    input_data.resize(input_sz, 0);
+    {
+      let mut input_h = unsafe { from_raw_parts_mut(input_data.as_mut_ptr() as *mut f32, input_data.len() / 4) };
+      self.in_.buf.borrow().as_ref().store_sync(&mut input_h, self.stream.conn());
+    }
+    input_data
+  }
+
+  fn _dump_output(&mut self) -> Vec<u8> {
+    let output_sz = self.cfg.batch_sz * self.cfg.out_dim().flat_len() * 4;
+    let mut output_data = Vec::with_capacity(output_sz);
+    output_data.resize(output_sz, 0);
+    {
+      let mut output_h = unsafe { from_raw_parts_mut(output_data.as_mut_ptr() as *mut f32, output_data.len() / 4) };
+      self.tmp_buf.as_ref().store_sync(&mut output_h, self.stream.conn());
+    }
+    output_data
   }
 }
 
@@ -865,27 +953,27 @@ impl<S> DeviceBatchNormConv2dOperator<S> {
     let (out_w, out_h, out_chan) = cfg.out_dim();
     let mut workspace_size = 0;
     let fwd = CudnnConvFwdOp::create_fastest(
-        CudnnTensorDesc::<f32>::create_4d(in_w, in_h, in_chan, cfg.batch_sz).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, in_w, in_h, in_chan, cfg.batch_sz).unwrap(),
         CudnnFilterDesc::<f32>::create_4d(cfg.kernel_w, cfg.kernel_h, in_chan, out_chan).unwrap(),
         CudnnConvDesc::create_2d(cfg.stride_w, cfg.stride_h, cfg.pad_w, cfg.pad_h).unwrap(),
-        CudnnTensorDesc::<f32>::create_4d(out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
         &*stream.conn().cudnn(),
     ).unwrap();
     workspace_size = max(workspace_size, fwd.work_size);
     let bwd_w = CudnnConvBwdFilterOp::create_fastest(
-        CudnnTensorDesc::<f32>::create_4d(in_w, in_h, in_chan, cfg.batch_sz).unwrap(),
-        CudnnTensorDesc::<f32>::create_4d(out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, in_w, in_h, in_chan, cfg.batch_sz).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
         CudnnConvDesc::create_2d(cfg.stride_w, cfg.stride_h, cfg.pad_w, cfg.pad_h).unwrap(),
         CudnnFilterDesc::<f32>::create_4d(cfg.kernel_w, cfg.kernel_h, in_chan, out_chan).unwrap(),
-        CudnnTensorDesc::<f32>::create_4d(1, 1, out_chan, 1).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, 1, 1, out_chan, 1).unwrap(),
         &*stream.conn().cudnn(),
     ).unwrap();
     workspace_size = max(workspace_size, bwd_w.work_size);
     let bwd_d = CudnnConvBwdDataOp::create_fastest(
         CudnnFilterDesc::<f32>::create_4d(cfg.kernel_w, cfg.kernel_h, in_chan, out_chan).unwrap(),
-        CudnnTensorDesc::<f32>::create_4d(out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
         CudnnConvDesc::create_2d(cfg.stride_w, cfg.stride_h, cfg.pad_w, cfg.pad_h).unwrap(),
-        CudnnTensorDesc::<f32>::create_4d(in_w, in_h, in_chan, cfg.batch_sz).unwrap(),
+        CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, in_w, in_h, in_chan, cfg.batch_sz).unwrap(),
         &*stream.conn().cudnn(),
     ).unwrap();
     workspace_size = max(workspace_size, bwd_d.work_size);

@@ -1,19 +1,15 @@
 #include <cuda_runtime_api.h>
-//#include <stdint.h>
+#include <stdint.h>
 
 __global__ void activate_rect_fwd_kernel(
     const float *in_act,
-    int dim,
+    uint32_t dim,
     float *out_act)
 {
-  int idx = threadIdx.x + blockIdx.x * blockDim.x;
+  uint32_t idx = threadIdx.x + blockIdx.x * blockDim.x;
   if (idx < dim) {
     float x = in_act[idx];
-    if (x > 0.0f) {
-      out_act[idx] = x;
-    } else {
-      out_act[idx] = 0.0f;
-    }
+    out_act[idx] = x * (x > 0.0f);
   }
 }
 
@@ -29,18 +25,14 @@ extern "C" void neuralops_cuda_activate_rect_fwd(
 
 __global__ void activate_rect_bwd_kernel(
     const float *in_act,
-    int dim,
+    uint32_t dim,
     const float *out_delta,
     float *in_delta)
 {
-  int idx = threadIdx.x + blockIdx.x * blockDim.x;
+  uint32_t idx = threadIdx.x + blockIdx.x * blockDim.x;
   if (idx < dim) {
     float x = in_act[idx];
-    if (x > 0.0f) {
-      in_delta[idx] = out_delta[idx];
-    } else {
-      in_delta[idx] = 0.0f;
-    }
+    in_delta[idx] = out_delta[idx] * (x > 0.0f);
   }
 }
 
@@ -53,4 +45,57 @@ extern "C" void neuralops_cuda_activate_rect_bwd(
 {
   activate_rect_bwd_kernel<<<(dim+1024-1)/1024, 1024, 0, stream>>>(
       in_act, dim, out_delta, in_delta);
+}
+
+__global__ void activate_leakrect_fwd_kernel(
+    const float *in_act,
+    uint32_t dim,
+    float *out_act,
+    float neg_slope)
+{
+  uint32_t idx = threadIdx.x + blockIdx.x * blockDim.x;
+  if (idx < dim) {
+    float x = in_act[idx];
+    int mask = x > 0.0f;
+    out_act[idx] = x * (neg_slope * (1 - mask) + mask);
+  }
+}
+
+extern "C" void neuralops_cuda_activate_leakrect_fwd(
+    const float *in_act,
+    size_t dim,
+    float *out_act,
+    float neg_slope,
+    cudaStream_t stream)
+{
+  activate_leakrect_fwd_kernel<<<(dim+1024-1)/1024, 1024, 0, stream>>>(
+      in_act, dim, out_act, neg_slope);
+}
+
+__global__ void activate_leakrect_bwd_kernel(
+    const float *in_act,
+    uint32_t dim,
+    const float *out_delta,
+    float *in_delta,
+    float neg_slope)
+{
+  uint32_t idx = threadIdx.x + blockIdx.x * blockDim.x;
+  if (idx < dim) {
+    float x = in_act[idx];
+    int mask = x > 0.0f;
+    float dy = out_delta[idx];
+    in_delta[idx] = dy * (neg_slope * (1 - mask) + mask);
+  }
+}
+
+extern "C" void neuralops_cuda_activate_leakrect_bwd(
+    const float *in_act,
+    size_t dim,
+    const float *out_delta,
+    float *in_delta,
+    float neg_slope,
+    cudaStream_t stream)
+{
+  activate_leakrect_bwd_kernel<<<(dim+1024-1)/1024, 1024, 0, stream>>>(
+      in_act, dim, out_delta, in_delta, neg_slope);
 }

@@ -17,6 +17,19 @@ extern "C" {
       out_delta: *const f32,
       in_delta: *mut f32,
       stream: cudaStream_t);
+  pub fn neuralops_cuda_activate_leakrect_fwd(
+      in_act: *const f32,
+      dim: size_t,
+      out_act: *mut f32,
+      neg_slope: f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_activate_leakrect_bwd(
+      in_act: *const f32,
+      dim: size_t,
+      out_delta: *const f32,
+      in_delta: *mut f32,
+      neg_slope: f32,
+      stream: cudaStream_t);
 
   pub fn neuralops_cuda_clamp(
       y: *mut f32,
@@ -133,6 +146,26 @@ extern "C" {
       in_width: size_t, in_height: size_t, channels: size_t,
       out_pixels: *mut f32,
       out_width: size_t, out_height: size_t,
+      stream: cudaStream_t);
+
+  pub fn neuralops_cuda_linear_bias_fwd(
+      in_buf: *const f32,
+      dim: size_t,
+      batch_size: size_t,
+      bias: *const f32,
+      out_buf: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_linear_bias_fwd_inplace(
+      out_buf: *mut f32,
+      dim: size_t,
+      batch_size: size_t,
+      bias: *const f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_linear_bias_bwd(
+      out_grad: *const f32,
+      dim: size_t,
+      batch_size: size_t,
+      in_grad: *mut f32,
       stream: cudaStream_t);
 
   pub fn neuralops_cuda_ind_lst_sq_fwd(
