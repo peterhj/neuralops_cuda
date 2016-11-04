@@ -3,8 +3,8 @@ use activate::{DeviceActivateKernel};
 use kernels::*;
 //use util::*;
 
-use cuda_dnn::v4::{CudnnPoolingOp, CudnnTensorLayout, CudnnTensorDesc};
-use cuda_dnn::v4::ffi::*;
+use cuda_dnn::v5::{CudnnPoolingOp, CudnnTensorLayout, CudnnTensorDesc};
+use cuda_dnn::v5::ffi::*;
 use densearray::prelude::*;
 use devicemem_cuda::prelude::*;
 use neuralops::prelude::*;

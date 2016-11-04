@@ -2,8 +2,8 @@ use prelude::*;
 use activate::{DeviceActivateKernel};
 use kernels::*;
 
-use cuda_dnn::v4::{CudnnTensorLayout, CudnnTensorDesc, CudnnFilterDesc, CudnnConvDesc, CudnnAddOp, CudnnConvFwdOp, CudnnConvBwdFilterOp, CudnnConvBwdDataOp};
-use cuda_dnn::v4::ffi::*;
+use cuda_dnn::v5::{CudnnTensorLayout, CudnnTensorDesc, CudnnFilterDesc, CudnnConvDesc, CudnnAddOp, CudnnConvFwdOp, CudnnConvBwdFilterOp, CudnnConvBwdDataOp};
+use cuda_dnn::v5::ffi::*;
 use densearray::prelude::*;
 use devicemem_cuda::prelude::*;
 use neuralops::prelude::*;

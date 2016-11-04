@@ -37,6 +37,7 @@ fn main() {
     batch_sz:   batch_sz,
     max_stride: 784,
     out_dim:    (28, 28, 1),
+    in_dtype:   Dtype::F32,
     preprocs:   vec![
       VarInputPreproc::Scale{scale: 1.0 / 255.0},
     ],
