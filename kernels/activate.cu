@@ -99,3 +99,50 @@ extern "C" void neuralops_cuda_activate_leakrect_bwd(
   activate_leakrect_bwd_kernel<<<(dim+1024-1)/1024, 1024, 0, stream>>>(
       in_act, dim, out_delta, in_delta, neg_slope);
 }
+
+__global__ void activate_logistic_fwd_kernel(
+    const float *in_buf,
+    uint32_t dim,
+    float *out_buf)
+{
+  uint32_t idx = threadIdx.x + blockIdx.x * blockDim.x;
+  if (idx < dim) {
+    float x = in_buf[idx];
+    out_buf[idx] = 1.0f / (1.0f + expf(-x));
+  }
+}
+
+extern "C" void neuralops_cuda_activate_logistic_fwd(
+    const float *in_buf,
+    size_t dim,
+    float *out_buf,
+    cudaStream_t stream)
+{
+  activate_logistic_fwd_kernel<<<(dim+1024-1)/1024, 1024, 0, stream>>>(
+      in_buf, dim, out_buf);
+}
+
+__global__ void activate_logistic_bwd_kernel(
+    const float *in_buf,
+    uint32_t dim,
+    const float *out_delta,
+    float *in_delta)
+{
+  uint32_t idx = threadIdx.x + blockIdx.x * blockDim.x;
+  if (idx < dim) {
+    float x = in_buf[idx];
+    float y = 1.0f / (1.0f + expf(-x));
+    in_delta[idx] = y * (1.0f - y) * out_delta[idx];
+  }
+}
+
+extern "C" void neuralops_cuda_activate_logistic_bwd(
+    const float *in_buf,
+    size_t dim,
+    const float *out_delta,
+    float *in_delta,
+    cudaStream_t stream)
+{
+  activate_logistic_bwd_kernel<<<(dim+1024-1)/1024, 1024, 0, stream>>>(
+      in_buf, dim, out_delta, in_delta);
+}

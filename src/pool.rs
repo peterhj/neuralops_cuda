@@ -63,17 +63,19 @@ impl<S> NewDiffOperator<S> for DeviceCaffePool2dOperator<S> {
   type IoBuf = [f32];
 
   fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
     apply(self);
+    self.node.pop(epoch);
   }
 
   fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
     self.in_op.borrow_mut()._traverse_bwd(epoch, apply);
+    self.node.pop(epoch);
   }
 
   fn _forward(&mut self, _phase: OpPhase) {
@@ -215,17 +217,19 @@ impl<S> NewDiffOperator<S> for DevicePool2dOperator<S> {
   type IoBuf = [f32];
 
   fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
     apply(self);
+    self.node.pop(epoch);
   }
 
   fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
     self.in_op.borrow_mut()._traverse_bwd(epoch, apply);
+    self.node.pop(epoch);
   }
 
   fn _forward(&mut self, _phase: OpPhase) {

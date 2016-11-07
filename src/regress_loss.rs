@@ -122,7 +122,7 @@ impl NewDiffOperator<SampleItem> for DeviceIndLstSqRegressLoss<SampleItem> {
   type IoBuf = [f32];
 
   fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<SampleItem, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
     if let Some(0) = self.batch_nr {
@@ -132,10 +132,11 @@ impl NewDiffOperator<SampleItem> for DeviceIndLstSqRegressLoss<SampleItem> {
       }*/
     }
     apply(self);
+    self.node.pop(epoch);
   }
 
   fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<SampleItem, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
     self.in_op.borrow_mut()._traverse_bwd(epoch, apply);
@@ -145,6 +146,7 @@ impl NewDiffOperator<SampleItem> for DeviceIndLstSqRegressLoss<SampleItem> {
         apply(&mut *block.borrow_mut());
       }*/
     }
+    self.node.pop(epoch);
   }
 
   fn _next_iteration(&mut self) {

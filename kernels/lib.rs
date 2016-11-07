@@ -30,6 +30,23 @@ extern "C" {
       in_delta: *mut f32,
       neg_slope: f32,
       stream: cudaStream_t);
+  pub fn neuralops_cuda_activate_logistic_fwd(
+      in_act: *const f32,
+      dim: size_t,
+      out_act: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_activate_logistic_bwd(
+      in_act: *const f32,
+      dim: size_t,
+      out_delta: *const f32,
+      in_delta: *mut f32,
+      stream: cudaStream_t);
+
+  pub fn neuralops_cuda_cast_u8_to_f32(
+      x: *const u8,
+      dim: size_t,
+      y: *mut f32,
+      stream: cudaStream_t);
 
   pub fn neuralops_cuda_clamp(
       y: *mut f32,
@@ -168,6 +185,22 @@ extern "C" {
       in_grad: *mut f32,
       stream: cudaStream_t);
 
+  pub fn neuralops_cuda_logistic_nll_loss_fwd(
+      in_buf: *const f32,
+      batch_size: size_t,
+      labels: *const u32,
+      weights: *const f32,
+      losses: *mut f32,
+      preds: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_logistic_nll_loss_bwd(
+      in_buf: *const f32,
+      batch_size: size_t,
+      labels: *const u32,
+      weights: *const f32,
+      in_delta: *mut f32,
+      stream: cudaStream_t);
+
   pub fn neuralops_cuda_ind_lst_sq_fwd(
       in_buf: *const f32,
       dim: size_t,
@@ -245,7 +278,7 @@ extern "C" {
       out_buf: *mut f32,
       stream: cudaStream_t);
   pub fn neuralops_cuda_softmax_nll_loss_bwd(
-      in_buf: *const f32,
+      out_buf: *const f32,
       num_classes: size_t,
       batch_size: size_t,
       labels: *const u32,

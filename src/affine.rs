@@ -20,7 +20,6 @@ use std::slice::{from_raw_parts_mut};
 
 pub struct DeviceAffineOperator<S> {
   cfg:      AffineOperatorConfig,
-  //name:     String,
   node:     OperatorNode,
   stream:   DeviceStream,
   in_op:    Rc<RefCell<NewDiffOperator<S, IoBuf=[f32]>>>,
@@ -43,7 +42,6 @@ impl<S> DeviceAffineOperator<S> {
     let out = DeviceOutput::new(cfg.batch_sz, cfg.out_dim, cap, stream.conn());
     Rc::new(RefCell::new(DeviceAffineOperator{
       cfg:      cfg,
-      //name:     String::new(),
       node:     OperatorNode::default(),
       stream:   stream.clone(),
       in_op:    prev_op,
@@ -63,10 +61,6 @@ impl<S> DeviceAffineOperator<S> {
       act_kern: DeviceActivateKernel::new(cfg.out_dim, cfg.act_kind),
     }))
   }
-
-  /*pub fn set_name(&mut self, name: &str) {
-    self.name = String::from(name);
-  }*/
 }
 
 impl<S> Operator for DeviceAffineOperator<S> {
@@ -133,17 +127,19 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
   type IoBuf = [f32];
 
   fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
     apply(self);
+    self.node.pop(epoch);
   }
 
   fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
     self.in_op.borrow_mut()._traverse_bwd(epoch, apply);
+    self.node.pop(epoch);
   }
 
   fn _diff_param_sz(&self) -> usize {

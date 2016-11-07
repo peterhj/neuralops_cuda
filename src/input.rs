@@ -78,15 +78,17 @@ impl NewDiffOperator<SampleItem> for DeviceVarInputOperator<SampleItem> {
   type IoBuf = [f32];
 
   fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<SampleItem, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
+    self.node.pop(epoch);
   }
 
   fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<SampleItem, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
+    self.node.pop(epoch);
   }
 
   fn _save_rng_state(&mut self) {
@@ -104,12 +106,12 @@ impl NewDiffOperator<SampleItem> for DeviceVarInputOperator<SampleItem> {
     assert!(batch_size <= self.cfg.batch_sz);
     self.out.batch_sz.set(batch_size);
 
-    self.h_buf.cast_bytes_mut().reshape_mut(batch_size * self.cfg.max_stride).set_constant(0.0_f32);
+    self.h_buf.alias_bytes_mut().reshape_mut(batch_size * self.cfg.max_stride).set_constant(0.0_f32);
     self.in_dims.clear();
     for (idx, sample) in samples.iter().enumerate() {
       match self.cfg.in_dtype {
         Dtype::F32 => {
-          let mut h_buf: &mut [f32] = &mut self.h_buf.cast_bytes_mut()[idx * self.cfg.max_stride .. (idx+1) * self.cfg.max_stride];
+          let mut h_buf: &mut [f32] = &mut self.h_buf.alias_bytes_mut()[idx * self.cfg.max_stride .. (idx+1) * self.cfg.max_stride];
           if let Some(data) = sample.kvs.get::<SampleSharedExtractInputKey<[f32]>>() {
             data.extract_input(h_buf).unwrap();
           } else if let Some(data) = sample.kvs.get::<SampleExtractInputKey<[f32]>>() {
@@ -142,11 +144,15 @@ impl NewDiffOperator<SampleItem> for DeviceVarInputOperator<SampleItem> {
       Dtype::F32 => {
         self.out.buf.borrow_mut().as_mut()
           .slice_mut(0, batch_size * self.cfg.max_stride)
-          .load_sync(&self.h_buf.cast_bytes()[ .. batch_size * self.cfg.max_stride], self.stream.conn());
+          .load_sync(&self.h_buf.alias_bytes()[ .. batch_size * self.cfg.max_stride], self.stream.conn());
       }
       Dtype::U8 => {
-        // FIXME(20161103): need to cast from pixel byte to floats.
-        unimplemented!();
+        self.tmp_buf.as_mut()
+          .alias_bytes_mut()
+          .slice_mut(0, batch_size * self.cfg.max_stride)
+          .load_sync(&self.h_buf[ .. batch_size * self.cfg.max_stride], self.stream.conn());
+        self.out.buf.borrow_mut().as_mut().slice_mut(0, batch_size * self.cfg.max_stride)
+          .cast_from(self.tmp_buf.as_ref().alias_bytes().slice(0, batch_size * self.cfg.max_stride), self.stream.conn());
       }
       _ => unimplemented!(),
     }

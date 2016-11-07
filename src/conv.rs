@@ -301,17 +301,19 @@ impl<S> NewDiffOperator<S> for DeviceGemmConv2dOperator<S> {
   type IoBuf = [f32];
 
   fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
     apply(self);
+    self.node.pop(epoch);
   }
 
   fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
     self.in_op.borrow_mut()._traverse_bwd(epoch, apply);
+    self.node.pop(epoch);
   }
 
   fn _diff_param_sz(&self) -> usize {
@@ -521,6 +523,8 @@ pub struct DeviceConv2dOperator<S> {
   out:      DeviceOutput,
   hweights: Array4d<f32>,
   hbias:    Array1d<f32>,
+  weights_: Rc<RefCell<ParamBlock<DeviceArray4d<f32>>>>,
+  bias_:    Rc<RefCell<ParamBlock<DeviceArray1d<f32>>>>,
   weights:  DeviceArray4d<f32>,
   w_grad:   DeviceArray4d<f32>,
   bias:     DeviceArray1d<f32>,
@@ -611,6 +615,8 @@ impl<S> DeviceConv2dOperator<S> {
       out:      DeviceOutput::new(cfg.batch_sz, cfg.out_dim().flat_len(), cap, stream.conn()),
       hweights: Array4d::zeros((cfg.kernel_w, cfg.kernel_h, cfg.in_dim.2, cfg.out_chan)),
       hbias:    Array1d::zeros(cfg.out_chan),
+      weights_: ParamBlock::new(cap, || DeviceArray4d::zeros((cfg.kernel_w, cfg.kernel_h, cfg.in_dim.2, cfg.out_chan), stream.conn())),
+      bias_:    ParamBlock::new(cap, || DeviceArray1d::zeros(cfg.out_chan, stream.conn())),
       weights:  DeviceArray4d::zeros((cfg.kernel_w, cfg.kernel_h, cfg.in_dim.2, cfg.out_chan), stream.conn()),
       w_grad:   DeviceArray4d::zeros((cfg.kernel_w, cfg.kernel_h, cfg.in_dim.2, cfg.out_chan), stream.conn()),
       bias:     DeviceArray1d::zeros(cfg.out_chan, stream.conn()),
@@ -695,17 +701,19 @@ impl<S> NewDiffOperator<S> for DeviceConv2dOperator<S> {
   type IoBuf = [f32];
 
   fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
     apply(self);
+    self.node.pop(epoch);
   }
 
   fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
     self.in_op.borrow_mut()._traverse_bwd(epoch, apply);
+    self.node.pop(epoch);
   }
 
   fn _diff_param_sz(&self) -> usize {
@@ -854,8 +862,8 @@ impl<S> NewDiffOperator<S> for DeviceConv2dOperator<S> {
         1.0,
         in_buf.as_ref().as_ptr(),
         self.tmp_grad.as_ref().as_ptr(),
-        0.0,
-        //1.0,
+        //0.0,
+        1.0,
         self.w_grad.as_view_mut().as_mut_ptr(),
         self.scratch.as_mut().as_mut_ptr(),
         &*self.stream.conn().cudnn(),
@@ -864,8 +872,8 @@ impl<S> NewDiffOperator<S> for DeviceConv2dOperator<S> {
       unsafe { self.bwd_w.backward_bias(
           1.0,
           self.tmp_grad.as_ref().as_ptr(),
-          0.0,
-          //1.0,
+          //0.0,
+          1.0,
           self.b_grad.as_view_mut().as_mut_ptr(),
           &*self.stream.conn().cudnn(),
       ).unwrap() };
@@ -1026,17 +1034,19 @@ impl<S> NewDiffOperator<S> for DeviceBatchNormConv2dOperator<S> {
   type IoBuf = [f32];
 
   fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
     apply(self);
+    self.node.pop(epoch);
   }
 
   fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
     self.in_op.borrow_mut()._traverse_bwd(epoch, apply);
+    self.node.pop(epoch);
   }
 
   fn _diff_param_sz(&self) -> usize {
@@ -1312,17 +1322,19 @@ impl<S> NewDiffOperator<S> for DeviceResidualConv2dOperator<S> {
   type IoBuf = [f32];
 
   fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     self.join_op.borrow_mut()._traverse_fwd(epoch, apply);
     apply(self);
+    self.node.pop(epoch);
   }
 
   fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
     self.join_op.borrow_mut()._traverse_bwd(epoch, apply);
+    self.node.pop(epoch);
   }
 
   fn _forward(&mut self, phase: OpPhase) {
@@ -1444,17 +1456,19 @@ impl<S> NewDiffOperator<S> for DeviceProjResidualConv2dOperator<S> {
   type IoBuf = [f32];
 
   fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     self.join_op.borrow_mut()._traverse_fwd(epoch, apply);
     apply(self);
+    self.node.pop(epoch);
   }
 
   fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
     self.join_op.borrow_mut()._traverse_bwd(epoch, apply);
+    self.node.pop(epoch);
   }
 
   fn _forward(&mut self, phase: OpPhase) {

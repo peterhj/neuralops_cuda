@@ -57,20 +57,27 @@ impl<S> NewDiffOperator<S> for DeviceCopySplitOperator<S> {
   type IoBuf = [f32];
 
   fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(self.cfg.out_arms as _));
     if self.node.count() == 1 {
       self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
       apply(self);
+    } else if self.node.count() == self.cfg.out_arms as _ {
+      for _ in 0 .. self.cfg.out_arms as _ {
+        self.node.pop(epoch);
+      }
     }
   }
 
   fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
-    self.node.step(epoch);
+    self.node.push(epoch);
     assert!(self.node.limit(self.cfg.out_arms as _));
     if self.node.count() == self.cfg.out_arms as _ {
       apply(self);
       self.in_op.borrow_mut()._traverse_bwd(epoch, apply);
+      for _ in 0 .. self.cfg.out_arms as _ {
+        self.node.pop(epoch);
+      }
     }
   }
 
