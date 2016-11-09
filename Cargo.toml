@@ -41,16 +41,16 @@ path = "tools/shared-train-imagenet-sgd.rs"
 
 [dependencies]
 neuralops_cuda_kernels = { path = "kernels" }
-byteorder = "*"
-float = "*"
-libc = "*"
+libc = "^0.2"
 rand = "*"
-cuda = { path = "../libcuda" }
-cuda_dnn = { path = "../libcuda_dnn" }
-densearray = { path = "../libdensearray" }
+byteorder = "*"
+cuda = "^0.1"
+cuda_dnn = "^0.1"
+densearray = "^0.1"
 devicemem_cuda = { path = "../libdevicemem_cuda" }
-iter_utils = { path = "../libiter_utils" }
+float = "^0.1"
+iter_utils = "^0.1"
 neuralops = { path = "../neuralops" }
 operator = { path = "../liboperator" }
-rng = { path = "../librng" }
-sharedmem = { path = "../libsharedmem" }
+rng = "^0.1"
+sharedmem = "^0.1"

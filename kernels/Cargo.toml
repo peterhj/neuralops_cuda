@@ -13,5 +13,5 @@ path = "lib.rs"
 gcc = "*"
 
 [dependencies]
-libc = "*"
-cuda = { path = "../../libcuda" }
+libc = "^0.2"
+cuda = "^0.1"
