@@ -38,6 +38,7 @@ pub struct DeviceSoftmaxNLLClassLoss<S> /*where S: SampleLabel*/ {
   ws_h:     Vec<f32>,
   ts_h:     Vec<f32>,
   hats_h:   Vec<u32>,
+  probs_h:  Vec<f32>,
   losses_h: Vec<f32>,
   softmax:  DeviceSoftmaxKernel,
 }
@@ -57,6 +58,8 @@ impl<S> DeviceSoftmaxNLLClassLoss<S> /*where S: SampleLabel*/ {
     ts_h.resize(cfg.batch_sz, 1.0);
     let mut hats_h = Vec::with_capacity(cfg.batch_sz);
     hats_h.resize(cfg.batch_sz, 0);
+    let mut probs_h = Vec::with_capacity(cfg.batch_sz * cfg.num_classes);
+    probs_h.resize(cfg.batch_sz * cfg.num_classes, 0.0);
     let mut losses_h = Vec::with_capacity(cfg.batch_sz);
     losses_h.resize(cfg.batch_sz, 0.0);
     Rc::new(RefCell::new(DeviceSoftmaxNLLClassLoss{
@@ -81,6 +84,7 @@ impl<S> DeviceSoftmaxNLLClassLoss<S> /*where S: SampleLabel*/ {
       ws_h:     ws_h,
       ts_h:     ts_h,
       hats_h:   hats_h,
+      probs_h:  probs_h,
       losses_h: losses_h,
       softmax:  DeviceSoftmaxKernel::new(cfg.batch_sz, cfg.num_classes, stream.conn()),
     }))
@@ -194,6 +198,7 @@ impl NewDiffOperator<SampleItem> for DeviceSoftmaxNLLClassLoss<SampleItem> {
 
     out_buf.as_ref().store_sync(&mut self.losses_h, self.stream.conn());
     self.hats.as_ref().store_sync(&mut self.hats_h, self.stream.conn());
+    self.probs.as_ref().store_sync(&mut self.probs_h, self.stream.conn());
     let mut batch_loss = 0.0;
     let mut batch_accuracy = 0;
     for idx in 0 .. batch_size {
@@ -248,6 +253,10 @@ impl DiffLoss<SampleItem> for DeviceSoftmaxNLLClassLoss<SampleItem> {
 
   fn _store_accuracy(&mut self) -> usize {
     self.accuracy
+  }
+
+  fn _get_pred(&mut self) -> &[f32] {
+    &self.probs_h
   }
 }
 
@@ -419,11 +428,12 @@ impl NewDiffOperator<SampleItem> for DeviceLogisticNLLClassLoss<SampleItem> {
     let mut batch_accuracy = 0;
     for idx in 0 .. batch_size {
       batch_loss += self.losses_h[idx];
-      match (self.hats_h[idx] > 0.5, self.labels_h[idx] > 0) {
-        (false, false) | (true, true) => {
+      match (self.hats_h[idx] > 0.5, self.labels_h[idx]) {
+        (false, 0) | (true, 1) => {
           batch_accuracy += 1;
         }
-        (false, true) | (true, false) => {}
+        (false, 1) | (true, 0) => {}
+        _ => {}
       }
     }
     self.nsamples += batch_size;
@@ -471,5 +481,9 @@ impl DiffLoss<SampleItem> for DeviceLogisticNLLClassLoss<SampleItem> {
 
   fn _store_accuracy(&mut self) -> usize {
     self.accuracy
+  }
+
+  fn _get_pred(&mut self) -> &[f32] {
+    &self.hats_h
   }
 }

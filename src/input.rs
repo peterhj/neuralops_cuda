@@ -106,7 +106,15 @@ impl NewDiffOperator<SampleItem> for DeviceVarInputOperator<SampleItem> {
     assert!(batch_size <= self.cfg.batch_sz);
     self.out.batch_sz.set(batch_size);
 
-    self.h_buf.alias_bytes_mut().reshape_mut(batch_size * self.cfg.max_stride).set_constant(0.0_f32);
+    match self.cfg.in_dtype {
+      Dtype::F32 => {
+        self.h_buf.alias_bytes_mut().reshape_mut(batch_size * self.cfg.max_stride).set_constant(0.0_f32);
+      }
+      Dtype::U8 => {
+        self.h_buf.reshape_mut(batch_size * self.cfg.max_stride).set_constant(0);
+      }
+      _ => unimplemented!(),
+    }
     self.in_dims.clear();
     for (idx, sample) in samples.iter().enumerate() {
       match self.cfg.in_dtype {
