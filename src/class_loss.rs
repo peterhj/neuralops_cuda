@@ -141,6 +141,9 @@ impl NewDiffOperator<SampleItem> for DeviceSoftmaxNLLClassLoss<SampleItem> {
 
   fn _next_iteration(&mut self) {
     self.batch_nr = None;
+    /*self.nsamples = 0;
+    self.acc_loss = 0;
+    self.accuracy = 0;*/
   }
 
   fn _load_batch(&mut self, samples: &[SampleItem]) {

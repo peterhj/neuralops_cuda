@@ -654,8 +654,8 @@ impl<S> DeviceOperator for DeviceConv2dOperator<S> {
   }
 }
 
-impl<S> DiffOperatorRma<S, DeviceMem<f32>> for DeviceConv2dOperator<S> {
-  type Ctx = DeviceStream;
+/*impl<S> DiffOperatorRma<S, DeviceMem<f32>> for DeviceConv2dOperator<S> {
+  type RmaCtx = DeviceStream;
 
   fn _rma_load_diff_param(&mut self, init_offset: usize, param_reader: &mut DeviceMem<f32>, stream: DeviceStream) -> usize {
     let mut offset = init_offset;
@@ -695,7 +695,7 @@ impl<S> DiffOperatorRma<S, DeviceMem<f32>> for DeviceConv2dOperator<S> {
     offset += b_len;
     offset - init_offset
   }
-}
+}*/
 
 impl<S> NewDiffOperator<S> for DeviceConv2dOperator<S> {
   type IoBuf = [f32];

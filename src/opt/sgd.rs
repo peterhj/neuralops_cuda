@@ -23,7 +23,7 @@ pub struct DeviceSgdUpdateStep<T, Loss, S> where T: Copy {
   _marker:      PhantomData<fn (Loss, S)>,
 }
 
-impl<Loss, S> GradUpdateStep<f32, Loss, S> for DeviceSgdUpdateStep<f32, Loss, S> where Loss: DiffLoss<S, IoBuf=DeviceMem<f32>> /*+ DiffLossRma<S, DeviceMem<f32>, RmaCtx=DeviceStream>*/ {
+impl<Loss, S> GradUpdateStep<f32, Loss, S> for DeviceSgdUpdateStep<f32, Loss, S> where Loss: DiffLoss<S, IoBuf=DeviceMem<f32>> {
   type Cfg = DeviceSgdConfig;
 
   fn initialize(cfg: DeviceSgdConfig, loss: &mut Loss) -> DeviceSgdUpdateStep<f32, Loss, S> {
@@ -61,9 +61,6 @@ impl<Loss, S> GradUpdateStep<f32, Loss, S> for DeviceSgdUpdateStep<f32, Loss, S>
   }
 
   fn step(&mut self, iter_count: usize, loss: &mut Loss) {
-    /*loss.store_grad(&mut self.grad);
-    self.grad.as_mut().reshape_mut(self.grad_sz).div_scalar(minibatch_sz as f32);*/
-
     let step_size = match self.cfg.step_size {
       StepSize::Constant(alpha) => {
         alpha
@@ -75,11 +72,8 @@ impl<Loss, S> GradUpdateStep<f32, Loss, S> for DeviceSgdUpdateStep<f32, Loss, S>
       _ => unimplemented!(),
     };
     loss.store_diff_param(&mut self.param);
-    if let Some(GradientMomentum::HeavyBall(mu)) = self.cfg.momentum {
-      self.diff_acc.as_mut().reshape_mut(self.grad_sz).scale(mu, self.stream.conn());
-      self.diff_acc.as_mut().reshape_mut(self.grad_sz).add(-step_size, self.grad.as_ref().reshape(self.grad_sz), self.stream.conn());
-      self.param.as_mut().reshape_mut(self.grad_sz).add(1.0, self.diff_acc.as_ref().reshape(self.grad_sz), self.stream.conn());
-    } else if let Some(GradientMomentum::Nesterov(mu)) = self.cfg.momentum {
+    if self.cfg.momentum.is_some() {
+      let mu = self.cfg.momentum.unwrap().mu();
       self.diff_acc.as_mut().reshape_mut(self.grad_sz).scale(mu, self.stream.conn());
       self.diff_acc.as_mut().reshape_mut(self.grad_sz).add(-step_size, self.grad.as_ref().reshape(self.grad_sz), self.stream.conn());
       self.param.as_mut().reshape_mut(self.grad_sz).add(1.0, self.diff_acc.as_ref().reshape(self.grad_sz), self.stream.conn());
