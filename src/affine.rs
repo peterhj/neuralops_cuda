@@ -18,11 +18,11 @@ use std::cell::{RefCell};
 use std::rc::{Rc};
 use std::slice::{from_raw_parts_mut};
 
-pub struct DeviceAffineOperator<S> {
+pub struct DeviceAffineOperator<S, IoBuf: ?Sized> {
   cfg:      AffineOperatorConfig,
   node:     OperatorNode,
   stream:   DeviceStream,
-  in_op:    Rc<RefCell<NewDiffOperator<S, IoBuf=[f32]>>>,
+  in_op:    Rc<RefCell<DiffOperator<S, IoBuf>>>,
   in_:      DeviceOutput,
   out:      DeviceOutput,
   hweights: Array2d<f32>,
@@ -36,8 +36,8 @@ pub struct DeviceAffineOperator<S> {
   act_kern: DeviceActivateKernel,
 }
 
-impl<S> DeviceAffineOperator<S> {
-  pub fn new<InOp>(cfg: AffineOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceAffineOperator<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
+impl<S, IoBuf: ?Sized> DeviceAffineOperator<S, IoBuf> {
+  pub fn new<InOp>(cfg: AffineOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceAffineOperator<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
     let in_ = prev_op.borrow()._output(prev_arm);
     let out = DeviceOutput::new(cfg.batch_sz, cfg.out_dim, cap, stream.conn());
     Rc::new(RefCell::new(DeviceAffineOperator{
@@ -63,70 +63,107 @@ impl<S> DeviceAffineOperator<S> {
   }
 }
 
-impl<S> Operator for DeviceAffineOperator<S> {
+impl<S, IoBuf: ?Sized> Operator for DeviceAffineOperator<S, IoBuf> {
   fn _next(&self) -> u64 {
     self.node._next()
   }
-
-  fn _epoch(&self) -> u64 {
-    self.node._epoch()
-  }
 }
 
-impl<S> DeviceOperator for DeviceAffineOperator<S> {
+impl<S, IoBuf: ?Sized> DeviceOperator for DeviceAffineOperator<S, IoBuf> {
   fn _output(&self, arm: usize) -> DeviceOutput {
     assert_eq!(0, arm);
     self.out.clone()
   }
 }
 
-impl<S> DiffOperatorRma<S, DeviceMem<f32>> for DeviceAffineOperator<S> {
-  type Ctx = DeviceStream;
+impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceAffineOperator<S, IoBuf> {
+  default fn _load_diff_param(&mut self, init_offset: usize, param_reader: &mut IoBuf) -> usize {
+    unimplemented!();
+  }
 
-  fn _rma_load_diff_param(&mut self, init_offset: usize, param_reader: &mut DeviceMem<f32>, stream: DeviceStream) -> usize {
+  default fn _store_diff_param(&mut self, init_offset: usize, param_writer: &mut IoBuf) -> usize {
+    unimplemented!();
+  }
+
+  default fn _store_grad(&mut self, init_offset: usize, grad_writer: &mut IoBuf) -> usize {
+    unimplemented!();
+  }
+}
+
+impl<S> DiffOperatorIo<[f32]> for DeviceAffineOperator<S, [f32]> {
+  fn _load_diff_param(&mut self, init_offset: usize, param_reader: &mut [f32]) -> usize {
+    let mut offset = init_offset;
+    offset += param_reader.read_buf(offset, self.hweights.as_mut_slice());
+    offset += param_reader.read_buf(offset, self.hbias.as_mut_slice());
+    self.weights.as_view_mut().load_sync(self.hweights.as_view(), self.stream.conn());
+    self.bias.as_view_mut().load_sync(self.hbias.as_view(), self.stream.conn());
+    offset - init_offset
+  }
+
+  fn _store_diff_param(&mut self, init_offset: usize, param_writer: &mut [f32]) -> usize {
+    self.weights.as_view().store_sync(self.hweights.as_view_mut(), self.stream.conn());
+    self.bias.as_view().store_sync(self.hbias.as_view_mut(), self.stream.conn());
+    let mut offset = init_offset;
+    offset += param_writer.write_buf(offset, self.hweights.as_slice());
+    offset += param_writer.write_buf(offset, self.hbias.as_slice());
+    offset - init_offset
+  }
+
+  fn _store_grad(&mut self, init_offset: usize, grad_writer: &mut [f32]) -> usize {
+    self.w_grad.as_view().store_sync(self.hweights.as_view_mut(), self.stream.conn());
+    self.b_grad.as_view().store_sync(self.hbias.as_view_mut(), self.stream.conn());
+    let mut offset = init_offset;
+    offset += grad_writer.write_buf(offset, self.hweights.as_slice());
+    offset += grad_writer.write_buf(offset, self.hbias.as_slice());
+    offset - init_offset
+  }
+}
+
+impl<S> DiffOperatorIo<DeviceMem<f32>> for DeviceAffineOperator<S, DeviceMem<f32>> {
+  fn _load_diff_param(&mut self, init_offset: usize, param_reader: &mut DeviceMem<f32>) -> usize {
     let mut offset = init_offset;
     let w_len = self.weights.dim().flat_len();
     let b_len = self.bias.dim().flat_len();
     self.weights.as_view_mut().reshape_mut(w_len)
-      .copy(param_reader.as_ref().slice(offset, offset + w_len).reshape(w_len), stream.conn());
+      .copy(param_reader.as_ref().slice(offset, offset + w_len).reshape(w_len), self.stream.conn());
     offset += w_len;
     self.bias.as_view_mut()
-      .copy(param_reader.as_ref().slice(offset, offset + b_len).reshape(b_len), stream.conn());
+      .copy(param_reader.as_ref().slice(offset, offset + b_len).reshape(b_len), self.stream.conn());
     offset += b_len;
     offset - init_offset
   }
 
-  fn _rma_store_diff_param(&mut self, init_offset: usize, param_writer: &mut DeviceMem<f32>, stream: DeviceStream) -> usize {
+  fn _store_diff_param(&mut self, init_offset: usize, param_writer: &mut DeviceMem<f32>) -> usize {
     let mut offset = init_offset;
     let w_len = self.weights.dim().flat_len();
     let b_len = self.bias.dim().flat_len();
     param_writer.as_mut().slice_mut(offset, offset + w_len).reshape_mut(w_len)
-      .copy(self.weights.as_view().reshape(w_len), stream.conn());
+      .copy(self.weights.as_view().reshape(w_len), self.stream.conn());
     offset += w_len;
     param_writer.as_mut().slice_mut(offset, offset + b_len).reshape_mut(b_len)
-      .copy(self.bias.as_view(), stream.conn());
+      .copy(self.bias.as_view(), self.stream.conn());
     offset += b_len;
     offset - init_offset
   }
 
-  fn _rma_store_grad(&mut self, init_offset: usize, grad_writer: &mut DeviceMem<f32>, stream: DeviceStream) -> usize {
+  fn _store_grad(&mut self, init_offset: usize, grad_writer: &mut DeviceMem<f32>) -> usize {
     let mut offset = init_offset;
     let w_len = self.weights.dim().flat_len();
     let b_len = self.bias.dim().flat_len();
     grad_writer.as_mut().slice_mut(offset, offset + w_len).reshape_mut(w_len)
-      .copy(self.w_grad.as_view().reshape(w_len), stream.conn());
+      .copy(self.w_grad.as_view().reshape(w_len), self.stream.conn());
     offset += w_len;
     grad_writer.as_mut().slice_mut(offset, offset + b_len).reshape_mut(b_len)
-      .copy(self.b_grad.as_view(), stream.conn());
+      .copy(self.b_grad.as_view(), self.stream.conn());
     offset += b_len;
     offset - init_offset
   }
 }
 
-impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
-  type IoBuf = [f32];
+impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceAffineOperator<S, IoBuf> {
+  //type IoBuf = [f32];
 
-  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<S, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(1));
     self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
@@ -134,7 +171,7 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
     self.node.pop(epoch);
   }
 
-  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<S, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
@@ -186,33 +223,6 @@ impl<S> NewDiffOperator<S> for DeviceAffineOperator<S> {
     }
     self.bias.as_view_mut().load_sync(self.hbias.as_view(), self.stream.conn());*/
     self.bias.as_view_mut().set_constant(0.0, self.stream.conn());
-  }
-
-  fn _load_diff_param(&mut self, init_offset: usize, param_reader: &mut [f32]) -> usize {
-    let mut offset = init_offset;
-    offset += param_reader.read_buf(offset, self.hweights.as_mut_slice());
-    offset += param_reader.read_buf(offset, self.hbias.as_mut_slice());
-    self.weights.as_view_mut().load_sync(self.hweights.as_view(), self.stream.conn());
-    self.bias.as_view_mut().load_sync(self.hbias.as_view(), self.stream.conn());
-    offset - init_offset
-  }
-
-  fn _store_diff_param(&mut self, init_offset: usize, param_writer: &mut [f32]) -> usize {
-    self.weights.as_view().store_sync(self.hweights.as_view_mut(), self.stream.conn());
-    self.bias.as_view().store_sync(self.hbias.as_view_mut(), self.stream.conn());
-    let mut offset = init_offset;
-    offset += param_writer.write_buf(offset, self.hweights.as_slice());
-    offset += param_writer.write_buf(offset, self.hbias.as_slice());
-    offset - init_offset
-  }
-
-  fn _store_grad(&mut self, init_offset: usize, grad_writer: &mut [f32]) -> usize {
-    self.w_grad.as_view().store_sync(self.hweights.as_view_mut(), self.stream.conn());
-    self.b_grad.as_view().store_sync(self.hbias.as_view_mut(), self.stream.conn());
-    let mut offset = init_offset;
-    offset += grad_writer.write_buf(offset, self.hweights.as_slice());
-    offset += grad_writer.write_buf(offset, self.hbias.as_slice());
-    offset - init_offset
   }
 
   fn _reset_grad(&mut self) {

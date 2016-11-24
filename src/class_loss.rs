@@ -16,11 +16,11 @@ use std::cell::{RefCell};
 //use std::marker::{PhantomData};
 use std::rc::{Rc};
 
-pub struct DeviceSoftmaxNLLClassLoss<S> /*where S: SampleLabel*/ {
+pub struct DeviceSoftmaxNLLClassLoss<S, IoBuf: ?Sized> /*where S: SampleLabel*/ {
   cfg:      ClassLossConfig,
   node:     OperatorNode,
   stream:   DeviceStream,
-  in_op:    Rc<RefCell<NewDiffOperator<S, IoBuf=[f32]>>>,
+  in_op:    Rc<RefCell<DiffOperator<S, IoBuf>>>,
   in_:      DeviceOutput,
   out:      DeviceOutput,
   batch_nr: Option<usize>,
@@ -43,8 +43,8 @@ pub struct DeviceSoftmaxNLLClassLoss<S> /*where S: SampleLabel*/ {
   softmax:  DeviceSoftmaxKernel,
 }
 
-impl<S> DeviceSoftmaxNLLClassLoss<S> /*where S: SampleLabel*/ {
-  pub fn new<InOp>(cfg: ClassLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
+impl<S, IoBuf: ?Sized> DeviceSoftmaxNLLClassLoss<S, IoBuf> /*where S: SampleLabel*/ {
+  pub fn new<InOp>(cfg: ClassLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
     let in_ = prev_op.borrow()._output(prev_arm);
     let mut weights = DeviceMem::zeros(cfg.batch_sz, stream.conn());
     weights.as_mut().set_constant(1.0, stream.conn());
@@ -91,27 +91,47 @@ impl<S> DeviceSoftmaxNLLClassLoss<S> /*where S: SampleLabel*/ {
   }
 }
 
-impl<S> Operator for DeviceSoftmaxNLLClassLoss<S> /*where S: SampleLabel*/ {
+impl<S, IoBuf: ?Sized> Operator for DeviceSoftmaxNLLClassLoss<S, IoBuf> /*where S: SampleLabel*/ {
   fn _next(&self) -> u64 {
     self.node._next()
   }
-
-  fn _epoch(&self) -> u64 {
-    self.node._epoch()
-  }
 }
 
-impl<S> DeviceOperator for DeviceSoftmaxNLLClassLoss<S> /*where S: SampleLabel*/ {
+impl<S, IoBuf: ?Sized> DeviceOperator for DeviceSoftmaxNLLClassLoss<S, IoBuf> /*where S: SampleLabel*/ {
   fn _output(&self, arm: usize) -> DeviceOutput {
     assert_eq!(0, arm);
     self.out.clone()
   }
 }
 
-impl NewDiffOperator<SampleItem> for DeviceSoftmaxNLLClassLoss<SampleItem> {
-  type IoBuf = [f32];
+impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLoss<SampleItem, IoBuf> {
+  fn reset_loss(&mut self) {
+    self.nsamples = 0;
+    self.acc_loss = 0.0;
+    self.reg_loss = 0.0;
+    self.accuracy = 0;
+  }
 
-  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<SampleItem, IoBuf=Self::IoBuf>)) {
+  fn store_loss(&mut self) -> f32 {
+    self.acc_loss + self.reg_loss
+  }
+
+  fn _store_accuracy(&mut self) -> usize {
+    self.accuracy
+  }
+
+  fn _get_pred(&mut self) -> &[f32] {
+    &self.probs_h
+  }
+}
+
+impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceSoftmaxNLLClassLoss<S, IoBuf> {
+}
+
+impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLoss<SampleItem, IoBuf> {
+  //type IoBuf = [f32];
+
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(1));
     self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
@@ -125,7 +145,7 @@ impl NewDiffOperator<SampleItem> for DeviceSoftmaxNLLClassLoss<SampleItem> {
     self.node.pop(epoch);
   }
 
-  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<SampleItem, IoBuf=Self::IoBuf>)) {
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
@@ -229,7 +249,7 @@ impl NewDiffOperator<SampleItem> for DeviceSoftmaxNLLClassLoss<SampleItem> {
   }
 }
 
-impl<S> LossReport<ClassLossStats> for DeviceSoftmaxNLLClassLoss<S> {
+impl<S, IoBuf: ?Sized> LossReport<ClassLossStats> for DeviceSoftmaxNLLClassLoss<S, IoBuf> {
   fn update_stats(&mut self, iter_nr: usize, stats: &mut ClassLossStats) {
     let batch_size = self.out.batch_sz.get();
     stats.iter_nr = iter_nr;
@@ -239,32 +259,11 @@ impl<S> LossReport<ClassLossStats> for DeviceSoftmaxNLLClassLoss<S> {
   }
 }
 
-impl DiffLoss<SampleItem> for DeviceSoftmaxNLLClassLoss<SampleItem> {
-  fn reset_loss(&mut self) {
-    self.nsamples = 0;
-    self.acc_loss = 0.0;
-    self.reg_loss = 0.0;
-    self.accuracy = 0;
-  }
-
-  fn store_loss(&mut self) -> f32 {
-    self.acc_loss + self.reg_loss
-  }
-
-  fn _store_accuracy(&mut self) -> usize {
-    self.accuracy
-  }
-
-  fn _get_pred(&mut self) -> &[f32] {
-    &self.probs_h
-  }
-}
-
-pub struct DeviceLogisticNLLClassLoss<S> {
+pub struct DeviceLogisticNLLClassLoss<S, IoBuf: ?Sized> {
   cfg:      BinaryClassLossConfig,
   node:     OperatorNode,
   stream:   DeviceStream,
-  in_op:    Rc<RefCell<NewDiffOperator<S, IoBuf=[f32]>>>,
+  in_op:    Rc<RefCell<DiffOperator<S, IoBuf>>>,
   in_:      DeviceOutput,
   out:      DeviceOutput,
   batch_nr: Option<usize>,
@@ -282,8 +281,8 @@ pub struct DeviceLogisticNLLClassLoss<S> {
   hats_h:   Vec<f32>,
 }
 
-impl<S> DeviceLogisticNLLClassLoss<S> {
-  pub fn new<InOp>(cfg: BinaryClassLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceLogisticNLLClassLoss<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
+impl<S, IoBuf: ?Sized> DeviceLogisticNLLClassLoss<S, IoBuf> {
+  pub fn new<InOp>(cfg: BinaryClassLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceLogisticNLLClassLoss<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
     let in_ = prev_op.borrow()._output(prev_arm);
     let mut weights = DeviceMem::zeros(cfg.batch_sz, stream.conn());
     weights.as_mut().set_constant(1.0, stream.conn());
@@ -319,27 +318,47 @@ impl<S> DeviceLogisticNLLClassLoss<S> {
   }
 }
 
-impl<S> Operator for DeviceLogisticNLLClassLoss<S> /*where S: SampleLabel*/ {
+impl<S, IoBuf: ?Sized> Operator for DeviceLogisticNLLClassLoss<S, IoBuf> /*where S: SampleLabel*/ {
   fn _next(&self) -> u64 {
     self.node._next()
   }
-
-  fn _epoch(&self) -> u64 {
-    self.node._epoch()
-  }
 }
 
-impl<S> DeviceOperator for DeviceLogisticNLLClassLoss<S> /*where S: SampleLabel*/ {
+impl<S, IoBuf: ?Sized> DeviceOperator for DeviceLogisticNLLClassLoss<S, IoBuf> /*where S: SampleLabel*/ {
   fn _output(&self, arm: usize) -> DeviceOutput {
     assert_eq!(0, arm);
     self.out.clone()
   }
 }
 
-impl NewDiffOperator<SampleItem> for DeviceLogisticNLLClassLoss<SampleItem> {
-  type IoBuf = [f32];
+impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceLogisticNLLClassLoss<SampleItem, IoBuf> {
+  fn reset_loss(&mut self) {
+    self.nsamples = 0;
+    self.acc_loss = 0.0;
+    self.reg_loss = 0.0;
+    self.accuracy = 0;
+  }
 
-  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<SampleItem, IoBuf=Self::IoBuf>)) {
+  fn store_loss(&mut self) -> f32 {
+    self.acc_loss + self.reg_loss
+  }
+
+  fn _store_accuracy(&mut self) -> usize {
+    self.accuracy
+  }
+
+  fn _get_pred(&mut self) -> &[f32] {
+    &self.hats_h
+  }
+}
+
+impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceLogisticNLLClassLoss<S, IoBuf> {
+}
+
+impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceLogisticNLLClassLoss<SampleItem, IoBuf> {
+  //type IoBuf = [f32];
+
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(1));
     self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
@@ -353,7 +372,7 @@ impl NewDiffOperator<SampleItem> for DeviceLogisticNLLClassLoss<SampleItem> {
     self.node.pop(epoch);
   }
 
-  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<SampleItem, IoBuf=Self::IoBuf>)) {
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
@@ -464,26 +483,5 @@ impl NewDiffOperator<SampleItem> for DeviceLogisticNLLClassLoss<SampleItem> {
       self.weights.as_ref().post(&self.stream.conn());
       in_grad.as_ref().post(&self.stream.conn());
     }
-  }
-}
-
-impl DiffLoss<SampleItem> for DeviceLogisticNLLClassLoss<SampleItem> {
-  fn reset_loss(&mut self) {
-    self.nsamples = 0;
-    self.acc_loss = 0.0;
-    self.reg_loss = 0.0;
-    self.accuracy = 0;
-  }
-
-  fn store_loss(&mut self) -> f32 {
-    self.acc_loss + self.reg_loss
-  }
-
-  fn _store_accuracy(&mut self) -> usize {
-    self.accuracy
-  }
-
-  fn _get_pred(&mut self) -> &[f32] {
-    &self.hats_h
   }
 }

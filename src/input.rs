@@ -61,10 +61,6 @@ impl<S> Operator for DeviceVarInputOperator<S> {
   fn _next(&self) -> u64 {
     self.node._next()
   }
-
-  fn _epoch(&self) -> u64 {
-    self.node._epoch()
-  }
 }
 
 impl<S> DeviceOperator for DeviceVarInputOperator<S> {
@@ -74,17 +70,20 @@ impl<S> DeviceOperator for DeviceVarInputOperator<S> {
   }
 }
 
-impl NewDiffOperator<SampleItem> for DeviceVarInputOperator<SampleItem> {
-  type IoBuf = [f32];
+impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceVarInputOperator<S> {
+}
 
-  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<SampleItem, IoBuf=Self::IoBuf>)) {
+impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceVarInputOperator<SampleItem> {
+  //type IoBuf = [f32];
+
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
     self.node.pop(epoch);
   }
 
-  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<SampleItem, IoBuf=Self::IoBuf>)) {
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);

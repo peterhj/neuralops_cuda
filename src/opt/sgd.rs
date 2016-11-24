@@ -12,7 +12,7 @@ pub struct DeviceSgdConfig {
   pub stream:       DeviceStream,
 }
 
-pub struct DeviceSgdUpdateStep<T, Loss, S> where T: Copy {
+pub struct DeviceSgdUpdate<T> where T: Copy {
   cfg:          DeviceSgdConfig,
   grad_sz:      usize,
   stream:       DeviceStream,
@@ -20,20 +20,20 @@ pub struct DeviceSgdUpdateStep<T, Loss, S> where T: Copy {
   param_saved:  DeviceMem<T>,
   grad:         DeviceMem<T>,
   diff_acc:     DeviceMem<T>,
-  _marker:      PhantomData<fn (Loss, S)>,
+  //_marker:      PhantomData<fn (Loss, S)>,
 }
 
-impl<Loss, S> GradUpdateStep<f32, Loss, S> for DeviceSgdUpdateStep<f32, Loss, S> where Loss: DiffLoss<S, IoBuf=DeviceMem<f32>> /*+ DiffLossRma<S, DeviceMem<f32>, RmaCtx=DeviceStream>*/ {
+impl<Loss, S> GradUpdate<f32, Loss, S, DeviceMem<f32>> for DeviceSgdUpdate<f32> where Loss: DiffLoss<S, DeviceMem<f32>> {
   type Cfg = DeviceSgdConfig;
 
-  fn initialize(cfg: DeviceSgdConfig, loss: &mut Loss) -> DeviceSgdUpdateStep<f32, Loss, S> {
+  fn initialize(cfg: DeviceSgdConfig, loss: &mut Loss) -> DeviceSgdUpdate<f32> {
     let grad_sz = loss.diff_param_sz();
     let stream = cfg.stream.clone();
     let mut param = DeviceMem::zeros(grad_sz, stream.conn());
     let mut param_saved = DeviceMem::zeros(grad_sz, stream.conn());
     let mut grad = DeviceMem::zeros(grad_sz, stream.conn());
     let mut diff_acc = DeviceMem::zeros(grad_sz, stream.conn());
-    DeviceSgdUpdateStep{
+    DeviceSgdUpdate{
       cfg:          cfg,
       grad_sz:      grad_sz,
       stream:       stream,
@@ -41,7 +41,7 @@ impl<Loss, S> GradUpdateStep<f32, Loss, S> for DeviceSgdUpdateStep<f32, Loss, S>
       param_saved:  param_saved,
       grad:         grad,
       diff_acc:     diff_acc,
-      _marker:      PhantomData,
+      //_marker:      PhantomData,
     }
   }
 
@@ -63,9 +63,6 @@ impl<Loss, S> GradUpdateStep<f32, Loss, S> for DeviceSgdUpdateStep<f32, Loss, S>
   }
 
   fn step(&mut self, iter_count: usize, loss: &mut Loss) {
-    /*loss.store_grad(&mut self.grad);
-    self.grad.as_mut().reshape_mut(self.grad_sz).div_scalar(minibatch_sz as f32);*/
-
     let step_size = match self.cfg.step_size {
       StepSize::Constant(alpha) => {
         alpha

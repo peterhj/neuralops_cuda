@@ -13,7 +13,7 @@ const BATCH_NORM_EPSILON:   f32 = 1.0e-6;
 const INFOGAN_LEAKINESS:    f32 = 0.01;
 
 //pub fn build_cifar10_resnet20_loss<S>(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S>>> where S: 'static + SampleDatum<[f32]> + SampleLabel {
-pub fn build_cifar10_resnet20_loss(batch_sz: usize, augment: bool, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<SampleItem>>> {
+pub fn build_cifar10_resnet20_loss<IoBuf: ?Sized + 'static>(batch_sz: usize, augment: bool, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<SampleItem, IoBuf>>> {
   let mut preprocs = vec![
       // XXX: the pixel mean is:
       // (1.25306915e2 1.2295039e2 1.1386535e2).
@@ -125,7 +125,7 @@ pub fn build_cifar10_resnet20_loss(batch_sz: usize, augment: bool, stream: Devic
 }
 
 //pub fn build_cifar10_resnet56_loss<S>(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S>>> where S: 'static + SampleDatum<[f32]> + SampleLabel {
-pub fn build_cifar10_resnet56_loss(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<SampleItem>>> {
+pub fn build_cifar10_resnet56_loss<IoBuf: ?Sized + 'static>(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<SampleItem, IoBuf>>> {
   let input_cfg = VarInputOperatorConfig{
     batch_sz:   batch_sz,
     max_stride: 32 * 32 * 3,
@@ -251,7 +251,7 @@ pub fn build_cifar10_resnet56_loss(batch_sz: usize, stream: DeviceStream) -> Rc<
   loss
 }
 
-pub fn build_imagenet_resnet18_loss(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<SampleItem>>> {
+pub fn build_imagenet_resnet18_loss<IoBuf: ?Sized + 'static>(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<SampleItem, IoBuf>>> {
   let input_cfg = VarInputOperatorConfig{
     batch_sz:   batch_sz,
     max_stride: 16 * 480 * 480 * 3,

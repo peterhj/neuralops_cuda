@@ -10,17 +10,17 @@ use rng::xorshift::{Xorshiftplus128Rng};
 use std::cell::{RefCell};
 use std::rc::{Rc};
 
-pub struct DeviceCopySplitOperator<S> {
+pub struct DeviceCopySplitOperator<S, IoBuf: ?Sized> {
   cfg:      SplitOperatorConfig,
   node:     OperatorNode,
   stream:   DeviceStream,
-  in_op:    Rc<RefCell<NewDiffOperator<S, IoBuf=[f32]>>>,
+  in_op:    Rc<RefCell<DiffOperator<S, IoBuf>>>,
   in_:      DeviceOutput,
   out:      Vec<DeviceOutput>,
 }
 
-impl<S> DeviceCopySplitOperator<S> {
-  pub fn new<InOp>(cfg: SplitOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceCopySplitOperator<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
+impl<S, IoBuf: ?Sized> DeviceCopySplitOperator<S, IoBuf> {
+  pub fn new<InOp>(cfg: SplitOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceCopySplitOperator<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
     let prev_out = prev_op.borrow()._output(prev_arm);
     let mut out = Vec::with_capacity(cfg.out_arms);
     for arm in 0 .. cfg.out_arms {
@@ -37,26 +37,25 @@ impl<S> DeviceCopySplitOperator<S> {
   }
 }
 
-impl<S> Operator for DeviceCopySplitOperator<S> {
+impl<S, IoBuf: ?Sized> Operator for DeviceCopySplitOperator<S, IoBuf> {
   fn _next(&self) -> u64 {
     self.node._next()
   }
-
-  fn _epoch(&self) -> u64 {
-    self.node._epoch()
-  }
 }
 
-impl<S> DeviceOperator for DeviceCopySplitOperator<S> {
+impl<S, IoBuf: ?Sized> DeviceOperator for DeviceCopySplitOperator<S, IoBuf> {
   fn _output(&self, arm: usize) -> DeviceOutput {
     self.out[arm].clone()
   }
 }
 
-impl<S> NewDiffOperator<S> for DeviceCopySplitOperator<S> {
-  type IoBuf = [f32];
+impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceCopySplitOperator<S, IoBuf> {
+}
 
-  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
+impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceCopySplitOperator<S, IoBuf> {
+  //type IoBuf = [f32];
+
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<S, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(self.cfg.out_arms as _));
     if self.node.count() == 1 {
@@ -69,7 +68,7 @@ impl<S> NewDiffOperator<S> for DeviceCopySplitOperator<S> {
     }
   }
 
-  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<S, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(self.cfg.out_arms as _));
     if self.node.count() == self.cfg.out_arms as _ {

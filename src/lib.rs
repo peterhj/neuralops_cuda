@@ -1,3 +1,5 @@
+#![feature(specialization)]
+
 extern crate cuda;
 extern crate cuda_dnn;
 extern crate densearray;
@@ -22,6 +24,7 @@ pub mod deconv;
 pub mod input;
 pub mod join;
 pub mod kernels;
+pub mod opt;
 pub mod pool;
 pub mod prelude;
 pub mod regress_loss;
