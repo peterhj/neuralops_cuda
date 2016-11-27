@@ -158,7 +158,7 @@ impl<S> DiffOperatorIo<DeviceMem<f32>> for DeviceAffineOperator<S, DeviceMem<f32
     offset += b_len;
     offset - init_offset
   }
-}*/
+}
 
 impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceAffineOperator<S, IoBuf> {
   //type IoBuf = [f32];
