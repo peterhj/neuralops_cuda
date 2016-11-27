@@ -13,7 +13,7 @@ pub struct DeviceSgdConfig {
 }
 
 pub struct DeviceSgdUpdate<T> where T: Copy {
-  cfg:          DeviceSgdConfig,
+  cfg:          SgdConfig,
   grad_sz:      usize,
   stream:       DeviceStream,
   param:        DeviceMem<T>,
@@ -23,12 +23,12 @@ pub struct DeviceSgdUpdate<T> where T: Copy {
   //_marker:      PhantomData<fn (Loss, S)>,
 }
 
-impl<Loss, S> GradUpdate<f32, Loss, S, DeviceMem<f32>> for DeviceSgdUpdate<f32> where Loss: DiffLoss<S, DeviceMem<f32>> {
-  type Cfg = DeviceSgdConfig;
-
-  fn initialize(cfg: DeviceSgdConfig, loss: &mut Loss) -> DeviceSgdUpdate<f32> {
+impl<T> DeviceSgdUpdate<T> where T: ZeroBits {
+  pub fn new<Loss, S>(cfg: SgdConfig, stream: DeviceStream, loss: &mut Loss) -> Self
+  where Loss: DiffLoss<S, DeviceMem<T>>,
+  {
     let grad_sz = loss.diff_param_sz();
-    let stream = cfg.stream.clone();
+    //let stream = cfg.stream.clone();
     let mut param = DeviceMem::zeros(grad_sz, stream.conn());
     let mut param_saved = DeviceMem::zeros(grad_sz, stream.conn());
     let mut grad = DeviceMem::zeros(grad_sz, stream.conn());
@@ -44,6 +44,17 @@ impl<Loss, S> GradUpdate<f32, Loss, S, DeviceMem<f32>> for DeviceSgdUpdate<f32> 
       //_marker:      PhantomData,
     }
   }
+}
+
+impl<Loss, S> GradUpdate<f32, Loss, S, DeviceMem<f32>> for DeviceSgdUpdate<f32> where Loss: DiffLoss<S, DeviceMem<f32>> {
+  type Cfg = DeviceSgdConfig;
+
+  fn initialize(cfg: DeviceSgdConfig, loss: &mut Loss) -> DeviceSgdUpdate<f32> {
+    unimplemented!();
+  }
+
+  /*fn reset(&mut self, loss: &mut Loss) {
+  }*/
 
   fn begin_iteration(&mut self, loss: &mut Loss) {
     if let Some(GradientMomentum::Nesterov(mu)) = self.cfg.momentum {

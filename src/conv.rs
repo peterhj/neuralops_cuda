@@ -1130,15 +1130,57 @@ impl<S> DiffOperatorIo<[f32]> for DeviceBatchNormConv2dOperator<S, [f32]> {
 
 impl<S> DiffOperatorIo<DeviceMem<f32>> for DeviceBatchNormConv2dOperator<S, DeviceMem<f32>> {
   fn _load_diff_param(&mut self, init_offset: usize, param_reader: &mut DeviceMem<f32>) -> usize {
-    unimplemented!();
+    //unimplemented!();
+    let mut offset = init_offset;
+    let w_len = self.weights.dim().flat_len();
+    let s_len = self.scale_k.scale.dim().flat_len();
+    let b_len = self.scale_k.bias.dim().flat_len();
+    self.weights.as_view_mut().reshape_mut(w_len)
+      .copy(param_reader.as_ref().slice(offset, offset + w_len).reshape(w_len), self.stream.conn());
+    offset += w_len;
+    self.scale_k.scale.as_view_mut()
+      .copy(param_reader.as_ref().slice(offset, offset + s_len).reshape(s_len), self.stream.conn());
+    offset += s_len;
+    self.scale_k.bias.as_view_mut()
+      .copy(param_reader.as_ref().slice(offset, offset + b_len).reshape(b_len), self.stream.conn());
+    offset += b_len;
+    offset - init_offset
   }
 
   fn _store_diff_param(&mut self, init_offset: usize, param_writer: &mut DeviceMem<f32>) -> usize {
-    unimplemented!();
+    //unimplemented!();
+    let mut offset = init_offset;
+    let w_len = self.weights.dim().flat_len();
+    let s_len = self.scale_k.scale.dim().flat_len();
+    let b_len = self.scale_k.bias.dim().flat_len();
+    param_writer.as_mut().slice_mut(offset, offset + w_len).reshape_mut(w_len)
+      .copy(self.weights.as_view().reshape(w_len), self.stream.conn());
+    offset += w_len;
+    param_writer.as_mut().slice_mut(offset, offset + s_len).reshape_mut(s_len)
+      .copy(self.scale_k.scale.as_view(), self.stream.conn());
+    offset += s_len;
+    param_writer.as_mut().slice_mut(offset, offset + b_len).reshape_mut(b_len)
+      .copy(self.scale_k.bias.as_view(), self.stream.conn());
+    offset += b_len;
+    offset - init_offset
   }
 
   fn _store_grad(&mut self, init_offset: usize, grad_writer: &mut DeviceMem<f32>) -> usize {
-    unimplemented!();
+    //unimplemented!();
+    let mut offset = init_offset;
+    let w_len = self.weights.dim().flat_len();
+    let s_len = self.scale_k.scale.dim().flat_len();
+    let b_len = self.scale_k.bias.dim().flat_len();
+    grad_writer.as_mut().slice_mut(offset, offset + w_len).reshape_mut(w_len)
+      .copy(self.w_grad.as_view().reshape(w_len), self.stream.conn());
+    offset += w_len;
+    grad_writer.as_mut().slice_mut(offset, offset + s_len).reshape_mut(s_len)
+      .copy(self.scale_k.scale_g.as_view(), self.stream.conn());
+    offset += s_len;
+    grad_writer.as_mut().slice_mut(offset, offset + b_len).reshape_mut(b_len)
+      .copy(self.scale_k.bias_g.as_view(), self.stream.conn());
+    offset += b_len;
+    offset - init_offset
   }
 }
 
