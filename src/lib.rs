@@ -1,3 +1,5 @@
+#![feature(specialization)]
+
 extern crate cuda;
 extern crate cuda_dnn;
 extern crate densearray;

@@ -1,5 +1,5 @@
 use prelude::*;
-use activate::{DeviceActivateKernel};
+//use activate::{DeviceActivateKernel};
 use kernels::*;
 //use util::*;
 
@@ -16,17 +16,17 @@ use std::cell::{RefCell};
 use std::rc::{Rc};
 use std::path::{PathBuf};
 
-pub struct DeviceCaffePool2dOperator<S> {
+pub struct DeviceCaffePool2dOperator<S, IoBuf: ?Sized> {
   cfg:      Pool2dOperatorConfig,
   node:     OperatorNode,
   stream:   DeviceStream,
-  in_op:    Rc<RefCell<NewDiffOperator<S, IoBuf=[f32]>>>,
+  in_op:    Rc<RefCell<DiffOperator<S, IoBuf>>>,
   in_:      DeviceOutput,
   out:      DeviceOutput,
 }
 
-impl<S> DeviceCaffePool2dOperator<S> {
-  pub fn new<InOp>(cfg: Pool2dOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceCaffePool2dOperator<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
+impl<S, IoBuf: ?Sized> DeviceCaffePool2dOperator<S, IoBuf> {
+  pub fn new<InOp>(cfg: Pool2dOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceCaffePool2dOperator<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
     let in_ = prev_op.borrow()._output(prev_arm);
     let (in_w, in_h, chan) = cfg.in_dim;
     let (out_w, out_h, _) = cfg.out_dim();
@@ -42,27 +42,26 @@ impl<S> DeviceCaffePool2dOperator<S> {
   }
 }
 
-impl<S> Operator for DeviceCaffePool2dOperator<S> {
+impl<S, IoBuf: ?Sized> Operator for DeviceCaffePool2dOperator<S, IoBuf> {
   fn _next(&self) -> u64 {
     self.node._next()
   }
-
-  fn _epoch(&self) -> u64 {
-    self.node._epoch()
-  }
 }
 
-impl<S> DeviceOperator for DeviceCaffePool2dOperator<S> {
+impl<S, IoBuf: ?Sized> DeviceOperator for DeviceCaffePool2dOperator<S, IoBuf> {
   fn _output(&self, arm: usize) -> DeviceOutput {
     assert_eq!(0, arm);
     self.out.clone()
   }
 }
 
-impl<S> NewDiffOperator<S> for DeviceCaffePool2dOperator<S> {
-  type IoBuf = [f32];
+impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceCaffePool2dOperator<S, IoBuf> {
+}
 
-  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
+impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceCaffePool2dOperator<S, IoBuf> {
+  //type IoBuf = [f32];
+
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<S, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(1));
     self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
@@ -70,7 +69,7 @@ impl<S> NewDiffOperator<S> for DeviceCaffePool2dOperator<S> {
     self.node.pop(epoch);
   }
 
-  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<S, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
@@ -137,12 +136,12 @@ impl<S> NewDiffOperator<S> for DeviceCaffePool2dOperator<S> {
   }
 }
 
-pub struct DevicePool2dOperator<S> {
+pub struct DevicePool2dOperator<S, IoBuf: ?Sized> {
   cfg:      Pool2dOperatorConfig,
-  name:     String,
+  //name:     String,
   node:     OperatorNode,
   stream:   DeviceStream,
-  in_op:    Rc<RefCell<NewDiffOperator<S, IoBuf=[f32]>>>,
+  in_op:    Rc<RefCell<DiffOperator<S, IoBuf>>>,
   in_:      DeviceOutput,
   out:      DeviceOutput,
   h_in:     Vec<f32>,
@@ -150,8 +149,8 @@ pub struct DevicePool2dOperator<S> {
   pooling:  CudnnPoolingOp,
 }
 
-impl<S> DevicePool2dOperator<S> {
-  pub fn new<InOp>(cfg: Pool2dOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DevicePool2dOperator<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
+impl<S, IoBuf: ?Sized> DevicePool2dOperator<S, IoBuf> {
+  pub fn new<InOp>(cfg: Pool2dOperatorConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DevicePool2dOperator<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
     let in_ = prev_op.borrow()._output(prev_arm);
     let (in_w, in_h, chan) = cfg.in_dim;
     let (out_w, out_h, _) = cfg.out_dim();
@@ -179,7 +178,7 @@ impl<S> DevicePool2dOperator<S> {
     };
     Rc::new(RefCell::new(DevicePool2dOperator{
       cfg:      cfg,
-      name:     String::new(),
+      //name:     String::new(),
       node:     OperatorNode::default(),
       stream:   stream.clone(),
       in_op:    prev_op,
@@ -191,32 +190,31 @@ impl<S> DevicePool2dOperator<S> {
     }))
   }
 
-  pub fn set_name(&mut self, name: &str) {
+  /*pub fn set_name(&mut self, name: &str) {
     self.name = String::from(name);
-  }
+  }*/
 }
 
-impl<S> Operator for DevicePool2dOperator<S> {
+impl<S, IoBuf: ?Sized> Operator for DevicePool2dOperator<S, IoBuf> {
   fn _next(&self) -> u64 {
     self.node._next()
   }
-
-  fn _epoch(&self) -> u64 {
-    self.node._epoch()
-  }
 }
 
-impl<S> DeviceOperator for DevicePool2dOperator<S> {
+impl<S, IoBuf: ?Sized> DeviceOperator for DevicePool2dOperator<S, IoBuf> {
   fn _output(&self, arm: usize) -> DeviceOutput {
     assert_eq!(0, arm);
     self.out.clone()
   }
 }
 
-impl<S> NewDiffOperator<S> for DevicePool2dOperator<S> {
-  type IoBuf = [f32];
+impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DevicePool2dOperator<S, IoBuf> {
+}
 
-  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
+impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DevicePool2dOperator<S, IoBuf> {
+  //type IoBuf = [f32];
+
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<S, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(1));
     self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
@@ -224,7 +222,7 @@ impl<S> NewDiffOperator<S> for DevicePool2dOperator<S> {
     self.node.pop(epoch);
   }
 
-  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<S, IoBuf=Self::IoBuf>)) {
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<S, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);

@@ -1,6 +1,6 @@
 use prelude::*;
 use kernels::*;
-use softmax::{DeviceSoftmaxKernel};
+//use softmax::{DeviceSoftmaxKernel};
 
 use densearray::prelude::*;
 use devicemem_cuda::prelude::*;
@@ -16,11 +16,11 @@ use std::cell::{RefCell};
 //use std::marker::{PhantomData};
 use std::rc::{Rc};
 
-pub struct DeviceIndLstSqRegressLoss<S> {
+pub struct DeviceIndLstSqRegressLoss<S, IoBuf: ?Sized> {
   cfg:      IndLstSqRegressLossConfig,
   node:     OperatorNode,
   stream:   DeviceStream,
-  in_op:    Rc<RefCell<NewDiffOperator<S, IoBuf=[f32]>>>,
+  in_op:    Rc<RefCell<DiffOperator<S, IoBuf>>>,
   in_:      DeviceOutput,
   out:      DeviceOutput,
   batch_nr: Option<usize>,
@@ -46,8 +46,8 @@ pub struct DeviceIndLstSqRegressLoss<S> {
   //softmax:  DeviceSoftmaxKernel,
 }
 
-impl<S> DeviceIndLstSqRegressLoss<S> {
-  pub fn new<InOp>(cfg: IndLstSqRegressLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceIndLstSqRegressLoss<S>>> where InOp: 'static + DeviceOperator + NewDiffOperator<S, IoBuf=[f32]> {
+impl<S, IoBuf: ?Sized> DeviceIndLstSqRegressLoss<S, IoBuf> {
+  pub fn new<InOp>(cfg: IndLstSqRegressLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceIndLstSqRegressLoss<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
     let in_ = prev_op.borrow()._output(prev_arm);
     let mut weights = DeviceMem::zeros(cfg.batch_sz, stream.conn());
     weights.as_mut().set_constant(1.0, stream.conn());
@@ -101,27 +101,55 @@ impl<S> DeviceIndLstSqRegressLoss<S> {
   }
 }
 
-impl<S> Operator for DeviceIndLstSqRegressLoss<S> {
+impl<S, IoBuf: ?Sized> Operator for DeviceIndLstSqRegressLoss<S, IoBuf> {
   fn _next(&self) -> u64 {
     self.node._next()
   }
-
-  fn _epoch(&self) -> u64 {
-    self.node._epoch()
-  }
 }
 
-impl<S> DeviceOperator for DeviceIndLstSqRegressLoss<S> {
+impl<S, IoBuf: ?Sized> DeviceOperator for DeviceIndLstSqRegressLoss<S, IoBuf> {
   fn _output(&self, arm: usize) -> DeviceOutput {
     assert_eq!(0, arm);
     self.out.clone()
   }
 }
 
-impl NewDiffOperator<SampleItem> for DeviceIndLstSqRegressLoss<SampleItem> {
-  type IoBuf = [f32];
+impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceIndLstSqRegressLoss<SampleItem, IoBuf> {
+  fn reset_loss(&mut self) {
+    self.nsamples = 0;
+    self.acc_loss = 0.0;
+    self.reg_loss = 0.0;
+    //self.accuracy = 0;
+  }
 
-  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<SampleItem, IoBuf=Self::IoBuf>)) {
+  fn store_loss(&mut self) -> f32 {
+    self.acc_loss + self.reg_loss
+  }
+
+  /*fn _store_accuracy(&mut self) -> usize {
+    self.accuracy
+  }*/
+
+  fn _get_pred(&mut self) -> &[f32] {
+    &self.preds_h
+  }
+
+  fn _get_target(&mut self) -> &[f32] {
+    &self.htargets
+  }
+
+  fn _get_delta(&mut self) -> &[f32] {
+    &self.delta_h
+  }
+}
+
+impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceIndLstSqRegressLoss<S, IoBuf> {
+}
+
+impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceIndLstSqRegressLoss<SampleItem, IoBuf> {
+  //type IoBuf = [f32];
+
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(1));
     self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
@@ -135,7 +163,7 @@ impl NewDiffOperator<SampleItem> for DeviceIndLstSqRegressLoss<SampleItem> {
     self.node.pop(epoch);
   }
 
-  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut NewDiffOperator<SampleItem, IoBuf=Self::IoBuf>)) {
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
     self.node.push(epoch);
     assert!(self.node.limit(1));
     apply(self);
@@ -265,35 +293,6 @@ impl NewDiffOperator<SampleItem> for DeviceIndLstSqRegressLoss<SampleItem> {
 
       in_grad.as_ref().store_sync(&mut self.delta_h, self.stream.conn());
     }
-  }
-}
-
-impl DiffLoss<SampleItem> for DeviceIndLstSqRegressLoss<SampleItem> {
-  fn reset_loss(&mut self) {
-    self.nsamples = 0;
-    self.acc_loss = 0.0;
-    self.reg_loss = 0.0;
-    //self.accuracy = 0;
-  }
-
-  fn store_loss(&mut self) -> f32 {
-    self.acc_loss + self.reg_loss
-  }
-
-  /*fn _store_accuracy(&mut self) -> usize {
-    self.accuracy
-  }*/
-
-  fn _get_pred(&mut self) -> &[f32] {
-    &self.preds_h
-  }
-
-  fn _get_target(&mut self) -> &[f32] {
-    &self.htargets
-  }
-
-  fn _get_delta(&mut self) -> &[f32] {
-    &self.delta_h
   }
 }
 
