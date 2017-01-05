@@ -90,6 +90,10 @@ impl DeviceConv2dScaleKernel {
     self.bias_g.as_view().post(&conn);
     in_grad.post(&conn);
   }
+
+  pub fn _r_forward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+    unimplemented!();
+  }
 }
 
 pub struct DeviceConv2dBatchNormKernel {
@@ -220,6 +224,10 @@ impl DeviceConv2dBatchNormKernel {
     self.mean_g.as_view().post(&conn);
     self.var_g.as_view().post(&conn);
     in_grad.post(&conn);
+  }
+
+  pub fn _r_forward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+    unimplemented!();
   }
 
   pub fn _update(&mut self, avg_rate: f32, conn: DeviceConn) {
@@ -960,6 +968,10 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
     }
   }
 
+  fn _r_forward(&mut self) {
+    unimplemented!();
+  }
+
   fn _dump_input(&mut self) -> Vec<u8> {
     let input_sz = self.cfg.batch_sz * self.cfg.in_dim.flat_len() * 4;
     let mut input_data = Vec::with_capacity(input_sz);
@@ -993,6 +1005,7 @@ pub struct DeviceBatchNormConv2dOperator<S, IoBuf: ?Sized> {
   hweights: Array4d<f32>,
   weights:  DeviceArray4d<f32>,
   w_grad:   DeviceArray4d<f32>,
+  w_dir:    DeviceArray4d<f32>,
   t1_buf:   DeviceMem<f32>,
   t1_grad:  DeviceMem<f32>,
   t2_buf:   DeviceMem<f32>,
@@ -1049,6 +1062,7 @@ impl<S, IoBuf: ?Sized> DeviceBatchNormConv2dOperator<S, IoBuf> {
       hweights: Array4d::zeros((cfg.kernel_w, cfg.kernel_h, cfg.in_dim.2, cfg.out_chan)),
       weights:  DeviceArray4d::zeros((cfg.kernel_w, cfg.kernel_h, cfg.in_dim.2, cfg.out_chan), stream.conn()),
       w_grad:   DeviceArray4d::zeros((cfg.kernel_w, cfg.kernel_h, cfg.in_dim.2, cfg.out_chan), stream.conn()),
+      w_dir:    DeviceArray4d::zeros((cfg.kernel_w, cfg.kernel_h, cfg.in_dim.2, cfg.out_chan), stream.conn()),
       t1_buf:   DeviceMem::zeros(cfg.batch_sz * cfg.out_dim().flat_len(), stream.conn()),
       t1_grad:  DeviceMem::zeros(cfg.batch_sz * cfg.out_dim().flat_len(), stream.conn()),
       t2_buf:   DeviceMem::zeros(cfg.batch_sz * cfg.out_dim().flat_len(), stream.conn()),
@@ -1357,6 +1371,58 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceBatchNormConv2dOperator<
       self.weights.as_view().post(&self.stream.conn());
       self.scratch.as_ref().post(&self.stream.conn());
     }
+  }
+
+  fn _r_forward(&mut self) {
+    let batch_size = self.in_.batch_sz.get();
+
+    let in_data = self.in_.buf.borrow();
+    let in_r_data = self.in_.r_data.as_ref().unwrap().borrow();
+
+    {
+      in_data.as_ref().wait(&self.stream.conn());
+      in_r_data.as_ref().wait(&self.stream.conn());
+      self.weights.as_view().wait(&self.stream.conn());
+      self.t1_buf.as_ref().wait(&self.stream.conn());
+      self.scratch.as_ref().wait(&self.stream.conn());
+      self.fwd.set_batch_size(batch_size).unwrap();
+      match unsafe { self.fwd.forward(
+          1.0,
+          in_r_data.as_ref().as_ptr(),
+          self.weights.as_view().as_ptr(),
+          0.0,
+          self.t1_buf.as_mut().as_mut_ptr(),
+          self.scratch.as_mut().as_mut_ptr(),
+          &*self.stream.conn().cudnn(),
+      ) } {
+        Ok(_) => {}
+        Err(e) => { panic!("cudnn conv fwd failed: {:?}", e); }
+      }
+      match unsafe { self.fwd.forward(
+          1.0,
+          in_data.as_ref().as_ptr(),
+          self.w_dir.as_view().as_ptr(),
+          1.0,
+          self.t1_buf.as_mut().as_mut_ptr(),
+          self.scratch.as_mut().as_mut_ptr(),
+          &*self.stream.conn().cudnn(),
+      ) } {
+        Ok(_) => {}
+        Err(e) => { panic!("cudnn conv fwd failed: {:?}", e); }
+      }
+      in_data.as_ref().post(&self.stream.conn());
+      in_r_data.as_ref().post(&self.stream.conn());
+      self.weights.as_view().post(&self.stream.conn());
+      self.t1_buf.as_ref().post(&self.stream.conn());
+      self.scratch.as_ref().post(&self.stream.conn());
+    }
+
+    let mut out_r_data = self.out.r_data.as_ref().unwrap().borrow_mut();
+    // FIXME(20161216)
+    unimplemented!();
+    /*self.bnorm_k._r_forward(batch_size, self.t1_buf.as_ref(), self.t2_buf.as_mut(), self.stream.conn());
+    self.scale_k._r_forward(batch_size, self.t2_buf.as_ref(), self.t3_buf.as_mut(), self.stream.conn());
+    self.act_kern._r_forward(batch_size, self.t3_buf.as_ref(), out_buf.as_mut(), self.stream.conn());*/
   }
 }
 

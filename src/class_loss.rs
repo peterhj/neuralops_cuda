@@ -31,9 +31,10 @@ pub struct DeviceSoftmaxNLLClassLoss<S, IoBuf: ?Sized> /*where S: SampleLabel*/ 
   acc_loss: f32,
   reg_loss: f32,
   accuracy: usize,
-  labels:   DeviceMem<u32>,
-  weights:  DeviceMem<f32>,
-  targets:  DeviceMem<f32>,
+  labels:       DeviceMem<u32>,
+  weights:      DeviceMem<f32>,
+  grad_weights: DeviceMem<f32>,
+  targets:      DeviceMem<f32>,
   labels_h: Vec<u32>,
   ws_h:     Vec<f32>,
   ts_h:     Vec<f32>,
@@ -46,8 +47,12 @@ pub struct DeviceSoftmaxNLLClassLoss<S, IoBuf: ?Sized> /*where S: SampleLabel*/ 
 impl<S, IoBuf: ?Sized> DeviceSoftmaxNLLClassLoss<S, IoBuf> /*where S: SampleLabel*/ {
   pub fn new<InOp>(cfg: ClassLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
     let in_ = prev_op.borrow()._output(prev_arm);
+    let mut labels = DeviceMem::zeros(cfg.batch_sz, stream.conn());
+    //labels.as_mut().set_constant(0xffff_ffff, stream.conn());
     let mut weights = DeviceMem::zeros(cfg.batch_sz, stream.conn());
     weights.as_mut().set_constant(1.0, stream.conn());
+    let mut grad_weights = DeviceMem::zeros(cfg.batch_sz, stream.conn());
+    grad_weights.as_mut().set_constant(1.0, stream.conn());
     let mut targets = DeviceMem::zeros(cfg.batch_sz, stream.conn());
     targets.as_mut().set_constant(1.0, stream.conn());
     let mut labels_h = Vec::with_capacity(cfg.batch_sz);
@@ -77,9 +82,10 @@ impl<S, IoBuf: ?Sized> DeviceSoftmaxNLLClassLoss<S, IoBuf> /*where S: SampleLabe
       acc_loss: 0.0,
       reg_loss: 0.0,
       accuracy: 0,
-      labels:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
-      weights:  weights,
-      targets:  targets,
+      labels:       labels,
+      weights:      weights,
+      grad_weights: grad_weights,
+      targets:      targets,
       labels_h: labels_h,
       ws_h:     ws_h,
       ts_h:     ts_h,
@@ -116,12 +122,26 @@ impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLoss<Sa
     self.acc_loss + self.reg_loss
   }
 
+  fn set_grad_weight_with_r_loss(&mut self) {
+    unimplemented!();
+  }
+
   fn _store_accuracy(&mut self) -> usize {
     self.accuracy
   }
 
   fn _get_pred(&mut self) -> &[f32] {
     &self.probs_h
+  }
+}
+
+impl<IoBuf: ?Sized> DiffNLLLoss<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLoss<SampleItem, IoBuf> {
+  fn cache_nll(&mut self) {
+    unimplemented!();
+  }
+
+  fn store_kl_divergence_to_cached(&mut self) -> f32 {
+    unimplemented!();
   }
 }
 
@@ -184,16 +204,6 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLos
       } else {
         self.ws_h[idx] = 1.0;
       }
-      /*if let Some(cat) = sample.class() {
-        assert!(cat < self.cfg.num_classes as u32);
-        assert!(cat != u32::MAX);
-        self.labels_h[idx] = cat;
-      } else {
-        self.labels_h[idx] = u32::MAX;
-      }
-      // FIXME(20161013): sample trait bounds.
-      //self.weights[idx] = 1.0;
-      //self.weights[idx] = sample.weight().unwrap_or(1.0);*/
     }
     self.labels.as_mut().load_sync(&self.labels_h, self.stream.conn());
     self.weights.as_mut().load_sync(&self.ws_h, self.stream.conn());

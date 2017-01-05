@@ -366,5 +366,10 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceVarInputOperator<S
   }
 
   fn _backward(&mut self) {
+    // Do nothing.
+  }
+
+  fn _r_forward(&mut self) {
+    // Do nothing. The output R-data should be kept as zeros.
   }
 }

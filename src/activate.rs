@@ -93,4 +93,8 @@ impl DeviceActivateKernel {
       _ => unimplemented!(),
     }
   }
+
+  pub fn _r_forward<'a>(&self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+    unimplemented!();
+  }
 }

@@ -16,6 +16,8 @@ pub struct DeviceOutput {
   pub batch_sz: Rc<Cell<usize>>,
   pub buf:      Rc<RefCell<DeviceMem<f32>>>,
   pub grad:     Option<Rc<RefCell<DeviceMem<f32>>>>,
+  pub r_data:   Option<Rc<RefCell<DeviceMem<f32>>>>,
+  //pub r_grad:   Option<Rc<RefCell<DeviceMem<f32>>>>,
 }
 
 impl DeviceOutput {
@@ -23,7 +25,12 @@ impl DeviceOutput {
     let out_len = batch_size * frame_size;
     let out_buf = Rc::new(RefCell::new(DeviceMem::zeros(out_len, conn.clone())));
     let out_grad = if cap.enable_backward() {
-      Some(Rc::new(RefCell::new(DeviceMem::zeros(out_len, conn))))
+      Some(Rc::new(RefCell::new(DeviceMem::zeros(out_len, conn.clone()))))
+    } else {
+      None
+    };
+    let r_data = if cap.enable_r_forward() {
+      Some(Rc::new(RefCell::new(DeviceMem::zeros(out_len, conn.clone()))))
     } else {
       None
     };
@@ -31,6 +38,7 @@ impl DeviceOutput {
       batch_sz: Rc::new(Cell::new(batch_size)),
       buf:      out_buf,
       grad:     out_grad,
+      r_data:   r_data,
     }
   }
 }
