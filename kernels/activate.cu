@@ -47,6 +47,30 @@ extern "C" void neuralops_cuda_activate_rect_bwd(
       in_act, dim, out_delta, in_delta);
 }
 
+__global__ void activate_rect_bwd2_kernel(
+    const float *in_act,
+    uint32_t dim,
+    const float *out_delta2,
+    float *in_delta2)
+{
+  uint32_t idx = threadIdx.x + blockIdx.x * blockDim.x;
+  if (idx < dim) {
+    float x = in_act[idx];
+    in_delta2[idx] = out_delta2[idx] * (x > 0.0f);
+  }
+}
+
+extern "C" void neuralops_cuda_activate_rect_bwd2(
+    const float *in_act,
+    size_t dim,
+    const float *out_delta2,
+    float *in_delta2,
+    cudaStream_t stream)
+{
+  activate_rect_bwd2_kernel<<<(dim+1024-1)/1024, 1024, 0, stream>>>(
+      in_act, dim, out_delta2, in_delta2);
+}
+
 __global__ void activate_leakrect_fwd_kernel(
     const float *in_act,
     uint32_t dim,

@@ -326,6 +326,49 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceAffineOperator<S, IoBuf>
     }
   }
 
+  fn _backward2(&mut self) {
+    let batch_size = self.out.batch_sz.get();
+
+    let out_grad2 = self.out.grad2(self.stream.conn());
+    self.act_kern._backward(batch_size, self.tmp_buf.as_ref(), out_grad2.as_ref(), self.tmp_grad.as_mut(), self.stream.conn());
+
+    let in_buf = self.in_.buf.borrow();
+    self.w_grad.as_view_mut()
+    //self.w_grad2.as_view_mut()
+      .matrix_prod(
+          1.0,
+          self.tmp_grad.as_ref().reshape((self.cfg.out_dim, batch_size)), Transpose::N,
+          in_buf.as_ref().reshape((self.cfg.in_dim, batch_size)), Transpose::T,
+          1.0,
+          self.stream.conn(),
+      );
+    if self.cfg.bias {
+      unimplemented!();
+      /*self.tmp_grad.as_ref().wait(&self.stream.conn());
+      self.b_grad.as_view().wait(&self.stream.conn());
+      unsafe { neuralops_cuda_linear_bias_bwd(
+          self.tmp_grad.as_ref().as_ptr(),
+          self.cfg.out_dim,
+          batch_size,
+          self.b_grad.as_view_mut().as_mut_ptr(),
+          self.stream.conn().raw_stream().ptr,
+      ) };
+      self.tmp_grad.as_ref().post(&self.stream.conn());
+      self.b_grad.as_view().post(&self.stream.conn());*/
+    }
+
+    let mut in_grad2 = self.in_.grad2(self.stream.conn());
+    in_grad2.as_mut().reshape_mut((self.cfg.in_dim, batch_size))
+      .matrix_prod(
+          1.0,
+          // FIXME(20170105): square of the weight.
+          self.weights.as_view(), Transpose::T,
+          self.tmp_grad.as_ref().reshape((self.cfg.out_dim, batch_size)), Transpose::N,
+          0.0,
+          self.stream.conn(),
+      );
+  }
+
   fn _dump_input(&mut self) -> Vec<u8> {
     let input_sz = self.cfg.batch_sz * self.cfg.in_dim * 4;
     let mut input_data = Vec::with_capacity(input_sz);

@@ -79,3 +79,45 @@ extern "C" void neuralops_cuda_softmax_nll_loss_bwd(
       targets,
       in_delta);
 }
+
+__global__ void softmax_nll_loss_bwd2_kernel(
+    const float *out_act,
+    uint32_t dim,
+    uint32_t batch_size,
+    const uint32_t *label_cats,
+    const float *weights,
+    float *in_delta2)
+{
+  uint32_t idx = threadIdx.x + blockIdx.x * blockDim.x;
+  uint32_t i = idx % dim;
+  uint32_t batch_idx = idx / dim;
+  if ((i < dim) && (batch_idx < batch_size)) {
+    uint32_t cat_i = label_cats[batch_idx];
+    float y = out_act[idx];
+    float dx2 = y;
+    if ((uint32_t)(i) == cat_i) {
+      dx2 -= 1.0f;
+    }
+    dx2 *= (1.0f - 2.0f * y) * weights[batch_idx];
+    in_delta2[idx] = dx2;
+  }
+}
+
+extern "C" void neuralops_cuda_softmax_nll_loss_bwd2(
+    const float *out_act,
+    size_t dim,
+    size_t batch_size,
+    const uint32_t *label_cats,
+    const float *weights,
+    float *in_delta2,
+    cudaStream_t stream)
+{
+  int n = dim * batch_size;
+  softmax_nll_loss_bwd2_kernel<<<(n+1024-1)/1024, 1024, 0, stream>>>(
+      out_act,
+      dim,
+      batch_size,
+      label_cats,
+      weights,
+      in_delta2);
+}

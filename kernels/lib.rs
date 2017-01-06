@@ -17,6 +17,12 @@ extern "C" {
       out_delta: *const f32,
       in_delta: *mut f32,
       stream: cudaStream_t);
+  pub fn neuralops_cuda_activate_rect_bwd2(
+      in_act: *const f32,
+      dim: size_t,
+      out_delta: *const f32,
+      in_delta: *mut f32,
+      stream: cudaStream_t);
   pub fn neuralops_cuda_activate_leakrect_fwd(
       in_act: *const f32,
       dim: size_t,
@@ -285,5 +291,13 @@ extern "C" {
       weights: *const f32,
       targets: *const f32,
       in_delta: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_softmax_nll_loss_bwd2(
+      out_buf: *const f32,
+      num_classes: size_t,
+      batch_size: size_t,
+      labels: *const u32,
+      weights: *const f32,
+      in_delta2: *mut f32,
       stream: cudaStream_t);
 }

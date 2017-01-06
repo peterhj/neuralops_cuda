@@ -260,6 +260,19 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLos
       );
     }
   }
+
+  fn _backward2(&mut self) {
+    let batch_size = self.out.batch_sz.get();
+    let mut in_grad2 = self.in_.grad2(self.stream.conn());
+    self.softmax._backward2(
+        batch_size,
+        self.probs.as_ref(),
+        self.labels.as_ref(),
+        self.weights.as_ref(),
+        in_grad2.as_mut(),
+        self.stream.conn(),
+    );
+  }
 }
 
 impl<S, IoBuf: ?Sized> LossReport<ClassLossStats> for DeviceSoftmaxNLLClassLoss<S, IoBuf> {

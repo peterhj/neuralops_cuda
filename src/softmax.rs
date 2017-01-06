@@ -133,4 +133,28 @@ impl DeviceSoftmaxKernel {
     targets.post(&conn);
     in_grad.post(&conn);
   }
+
+  pub fn _backward2<'a>(&'a self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, mut in_grad2: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+    assert!(batch_size <= self.batch_sz);
+
+    in_buf.wait(&conn);
+    labels.wait(&conn);
+    weights.wait(&conn);
+    in_grad2.wait(&conn);
+
+    unsafe { neuralops_cuda_softmax_nll_loss_bwd2(
+        in_buf.as_ptr(),
+        self.in_dim,
+        batch_size,
+        labels.as_ptr(),
+        weights.as_ptr(),
+        in_grad2.as_mut_ptr(),
+        conn.raw_stream().ptr,
+    ) };
+
+    in_buf.post(&conn);
+    labels.post(&conn);
+    weights.post(&conn);
+    in_grad2.post(&conn);
+  }
 }

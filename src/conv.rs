@@ -1373,11 +1373,62 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceBatchNormConv2dOperator<
     }
   }
 
+  fn _backward2(&mut self) {
+    let batch_size = self.out.batch_sz.get();
+
+    let out_grad = self.out.grad.as_ref().unwrap().borrow();
+    let out_grad2 = self.out.grad2(self.stream.conn());
+    self.act_kern._backward(batch_size, self.t3_buf.as_ref(), out_grad.as_ref(), self.t3_grad.as_mut(), self.stream.conn());
+    self.scale_k._backward(batch_size, self.t2_buf.as_ref(), self.t3_grad.as_ref(), self.t2_grad.as_mut(), self.stream.conn());
+    self.bnorm_k._backward(batch_size, self.t1_buf.as_ref(), self.t2_grad.as_ref(), self.t1_grad.as_mut(), self.stream.conn());
+
+    let in_buf = self.in_.buf.borrow();
+    in_buf.as_ref().wait(&self.stream.conn());
+    self.t1_grad.as_ref().wait(&self.stream.conn());
+    self.w_grad.as_view().wait(&self.stream.conn());
+    self.scratch.as_ref().wait(&self.stream.conn());
+    self.bwd_w.set_batch_size(batch_size).unwrap();
+    unsafe { self.bwd_w.backward_filter(
+        1.0,
+        in_buf.as_ref().as_ptr(),
+        self.t1_grad.as_ref().as_ptr(),
+        1.0,
+        self.w_grad.as_view_mut().as_mut_ptr(),
+        self.scratch.as_mut().as_mut_ptr(),
+        &*self.stream.conn().cudnn(),
+    ).unwrap() };
+    in_buf.as_ref().post(&self.stream.conn());
+    self.t1_grad.as_ref().post(&self.stream.conn());
+    self.w_grad.as_view().post(&self.stream.conn());
+    self.scratch.as_ref().post(&self.stream.conn());
+
+    let mut in_grad2 = self.in_.grad2(self.stream.conn());
+    in_grad2.as_ref().wait(&self.stream.conn());
+    self.t1_grad.as_ref().wait(&self.stream.conn());
+    self.weights.as_view().wait(&self.stream.conn());
+    self.scratch.as_ref().wait(&self.stream.conn());
+    self.bwd_d.set_batch_size(batch_size).unwrap();
+    unsafe { self.bwd_d.backward_data(
+        1.0,
+        self.weights.as_view().as_ptr(),
+        self.t1_grad.as_ref().as_ptr(),
+        0.0,
+        in_grad2.as_mut().as_mut_ptr(),
+        self.scratch.as_mut().as_mut_ptr(),
+        &*self.stream.conn().cudnn(),
+    ).unwrap() };
+    in_grad2.as_ref().post(&self.stream.conn());
+    self.t1_grad.as_ref().post(&self.stream.conn());
+    self.weights.as_view().post(&self.stream.conn());
+    self.scratch.as_ref().post(&self.stream.conn());
+  }
+
   fn _r_forward(&mut self) {
     let batch_size = self.in_.batch_sz.get();
 
     let in_data = self.in_.buf.borrow();
-    let in_r_data = self.in_.r_data.as_ref().unwrap().borrow();
+    //let in_r_data = self.in_.r_data.as_ref().unwrap().borrow();
+    let in_r_data = self.in_.r_data(self.stream.conn());
 
     {
       in_data.as_ref().wait(&self.stream.conn());
@@ -1417,7 +1468,8 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceBatchNormConv2dOperator<
       self.scratch.as_ref().post(&self.stream.conn());
     }
 
-    let mut out_r_data = self.out.r_data.as_ref().unwrap().borrow_mut();
+    //let mut out_r_data = self.out.r_data.as_ref().unwrap().borrow_mut();
+    let mut out_r_data = self.out.r_data(self.stream.conn());
     // FIXME(20161216)
     unimplemented!();
     /*self.bnorm_k._r_forward(batch_size, self.t1_buf.as_ref(), self.t2_buf.as_mut(), self.stream.conn());

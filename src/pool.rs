@@ -280,4 +280,38 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DevicePool2dOperator<S, IoBuf>
       in_grad.as_ref().post(&self.stream.conn());
     }
   }
+
+  fn _backward2(&mut self) {
+    let batch_size = self.out.batch_sz.get();
+    let in_buf = self.in_.buf.borrow();
+    let out_buf = self.out.buf.borrow();
+    let out_grad2 = self.out.grad2(self.stream.conn());
+    let mut in_grad2 = self.in_.grad2(self.stream.conn());
+
+    match self.cfg.kind {
+      PoolKind::Average => {
+        in_buf.as_ref().wait(&self.stream.conn());
+        out_buf.as_ref().wait(&self.stream.conn());
+        out_grad2.as_ref().wait(&self.stream.conn());
+        in_grad2.as_ref().wait(&self.stream.conn());
+        self.pooling.set_batch_size(batch_size).unwrap();
+        unsafe { self.pooling.backward(
+            in_buf.as_ref().as_ptr(),
+            out_buf.as_ref().as_ptr(),
+            out_grad2.as_ref().as_ptr(),
+            in_grad2.as_mut().as_mut_ptr(),
+            &*self.stream.conn().cudnn(),
+        ) }.unwrap();
+        in_buf.as_ref().post(&self.stream.conn());
+        out_buf.as_ref().post(&self.stream.conn());
+        out_grad2.as_ref().post(&self.stream.conn());
+        in_grad2.as_ref().post(&self.stream.conn());
+
+        let in_len = self.cfg.in_dim.flat_len();
+        let pool_size = self.cfg.pool_w * self.cfg.pool_h;
+        in_grad2.as_mut().reshape_mut(in_len * batch_size).scale(1.0 / pool_size as f32, self.stream.conn());
+      }
+      _ => unimplemented!(),
+    }
+  }
 }
