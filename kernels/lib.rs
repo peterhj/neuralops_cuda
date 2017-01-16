@@ -280,7 +280,6 @@ extern "C" {
       batch_size: size_t,
       labels: *const u32,
       weights: *const f32,
-      targets: *const f32,
       out_buf: *mut f32,
       stream: cudaStream_t);
   pub fn neuralops_cuda_softmax_nll_loss_bwd(
@@ -289,7 +288,7 @@ extern "C" {
       batch_size: size_t,
       labels: *const u32,
       weights: *const f32,
-      targets: *const f32,
+      jac_targ: *const f32,
       in_delta: *mut f32,
       stream: cudaStream_t);
   pub fn neuralops_cuda_softmax_nll_loss_bwd2(
@@ -298,6 +297,7 @@ extern "C" {
       batch_size: size_t,
       labels: *const u32,
       weights: *const f32,
+      jac_targ: *const f32,
       in_delta2: *mut f32,
       stream: cudaStream_t);
 }

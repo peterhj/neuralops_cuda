@@ -49,6 +49,9 @@ impl<S, IoBuf: ?Sized> DeviceOperator for DeviceCopySplitOperator<S, IoBuf> {
   }
 }
 
+impl<S, IoBuf: ?Sized> DiffOperatorData<S> for DeviceCopySplitOperator<S, IoBuf> {
+}
+
 impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceCopySplitOperator<S, IoBuf> {
 }
 

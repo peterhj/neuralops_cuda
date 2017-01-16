@@ -10,6 +10,7 @@ extern crate neuralops;
 extern crate neuralops_cuda_kernels;
 extern crate operator;
 extern crate rng;
+//extern crate typemap_alt as typemap;
 
 extern crate libc;
 extern crate rand;
@@ -20,6 +21,7 @@ pub mod archs;
 pub mod class_loss;
 pub mod common;
 pub mod conv;
+pub mod data;
 pub mod deconv;
 pub mod input;
 pub mod join;

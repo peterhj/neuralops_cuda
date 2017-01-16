@@ -26,7 +26,7 @@ impl DeviceSoftmaxKernel {
     }
   }
 
-  pub fn _forward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, targets: DeviceMemRef<'a, f32>, mut hats: DeviceMemRefMut<'a, u32>, mut probs: DeviceMemRefMut<'a, f32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+  pub fn _forward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, mut hats: DeviceMemRefMut<'a, u32>, mut probs: DeviceMemRefMut<'a, f32>, mut out_buf: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
     assert!(batch_size <= self.batch_sz);
     assert!(self.in_dim <= 1024);
 
@@ -36,7 +36,6 @@ impl DeviceSoftmaxKernel {
     in_buf.wait(&conn);
     labels.wait(&conn);
     weights.wait(&conn);
-    targets.wait(&conn);
     out_buf.wait(&conn);
 
     unsafe { neuralops_cuda_blockreduce_max_argmax(
@@ -59,7 +58,6 @@ impl DeviceSoftmaxKernel {
     in_buf.post(&conn);
     labels.post(&conn);
     weights.post(&conn);
-    targets.post(&conn);
     out_buf.post(&conn);
 
     // FIXME: copy only `batch_size * self.in_dim` amount.
@@ -69,7 +67,6 @@ impl DeviceSoftmaxKernel {
     in_buf.wait(&conn);
     labels.wait(&conn);
     weights.wait(&conn);
-    targets.wait(&conn);
     out_buf.wait(&conn);
 
     unsafe { neuralops_cuda_blockreduce_sum(
@@ -93,7 +90,6 @@ impl DeviceSoftmaxKernel {
         batch_size,
         labels.as_ptr(),
         weights.as_ptr(),
-        targets.as_ptr(),
         out_buf.as_mut_ptr(),
         conn.raw_stream().ptr,
     ) };
@@ -101,7 +97,6 @@ impl DeviceSoftmaxKernel {
     in_buf.post(&conn);
     labels.post(&conn);
     weights.post(&conn);
-    targets.post(&conn);
     out_buf.post(&conn);
 
     probs.slice_mut(0, batch_size * self.in_dim).copy(self.factor.as_ref().slice(0, batch_size * self.in_dim), conn.clone());
@@ -134,12 +129,13 @@ impl DeviceSoftmaxKernel {
     in_grad.post(&conn);
   }
 
-  pub fn _backward2<'a>(&'a self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, mut in_grad2: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+  pub fn _backward2<'a>(&'a self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, targets: DeviceMemRef<'a, f32>, mut in_grad2: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
     assert!(batch_size <= self.batch_sz);
 
     in_buf.wait(&conn);
     labels.wait(&conn);
     weights.wait(&conn);
+    targets.wait(&conn);
     in_grad2.wait(&conn);
 
     unsafe { neuralops_cuda_softmax_nll_loss_bwd2(
@@ -148,6 +144,7 @@ impl DeviceSoftmaxKernel {
         batch_size,
         labels.as_ptr(),
         weights.as_ptr(),
+        targets.as_ptr(),
         in_grad2.as_mut_ptr(),
         conn.raw_stream().ptr,
     ) };
@@ -155,6 +152,7 @@ impl DeviceSoftmaxKernel {
     in_buf.post(&conn);
     labels.post(&conn);
     weights.post(&conn);
+    targets.post(&conn);
     in_grad2.post(&conn);
   }
 }

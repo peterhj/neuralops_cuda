@@ -70,36 +70,13 @@ impl<S> DeviceOperator for DeviceVarInputOperator<S> {
   }
 }
 
-impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceVarInputOperator<S> {
+impl<S> DiffOperatorData<S> for DeviceVarInputOperator<S> {
+  default fn _load_batch(&mut self, samples: &[S]) {
+    unimplemented!();
+  }
 }
 
-impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceVarInputOperator<SampleItem> {
-  //type IoBuf = [f32];
-
-  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
-    self.node.push(epoch);
-    assert!(self.node.limit(1));
-    apply(self);
-    self.node.pop(epoch);
-  }
-
-  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
-    self.node.push(epoch);
-    assert!(self.node.limit(1));
-    apply(self);
-    self.node.pop(epoch);
-  }
-
-  fn _save_rng_state(&mut self) {
-    self.r_state.clear();
-    self.r_state.resize(self.rng.state_size(), 0);
-    self.rng.extract_state(&mut self.r_state);
-  }
-
-  fn _restore_rng_state(&mut self) {
-    self.rng.set_state(&self.r_state);
-  }
-
+impl DiffOperatorData<SampleItem> for DeviceVarInputOperator<SampleItem> {
   fn _load_batch(&mut self, samples: &[SampleItem]) {
     let batch_size = samples.len();
     assert!(batch_size <= self.cfg.batch_sz);
@@ -163,6 +140,37 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceVarInputOperator<S
       }
       _ => unimplemented!(),
     }
+  }
+}
+
+impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceVarInputOperator<S> {
+}
+
+impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceVarInputOperator<SampleItem> {
+  //type IoBuf = [f32];
+
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
+    self.node.push(epoch);
+    assert!(self.node.limit(1));
+    apply(self);
+    self.node.pop(epoch);
+  }
+
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
+    self.node.push(epoch);
+    assert!(self.node.limit(1));
+    apply(self);
+    self.node.pop(epoch);
+  }
+
+  fn _save_rng_state(&mut self) {
+    self.r_state.clear();
+    self.r_state.resize(self.rng.state_size(), 0);
+    self.rng.extract_state(&mut self.r_state);
+  }
+
+  fn _restore_rng_state(&mut self) {
+    self.rng.set_state(&self.r_state);
   }
 
   fn _forward(&mut self, phase: OpPhase) {

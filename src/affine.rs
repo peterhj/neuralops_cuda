@@ -76,6 +76,9 @@ impl<S, IoBuf: ?Sized> DeviceOperator for DeviceAffineOperator<S, IoBuf> {
   }
 }
 
+impl<S, IoBuf: ?Sized> DiffOperatorData<S> for DeviceAffineOperator<S, IoBuf> {
+}
+
 impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceAffineOperator<S, IoBuf> {
   default fn _load_diff_param(&mut self, init_offset: usize, param_reader: &mut IoBuf) -> usize {
     unimplemented!();

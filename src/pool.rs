@@ -55,6 +55,9 @@ impl<S, IoBuf: ?Sized> DeviceOperator for DeviceCaffePool2dOperator<S, IoBuf> {
   }
 }
 
+impl<S, IoBuf: ?Sized> DiffOperatorData<S> for DeviceCaffePool2dOperator<S, IoBuf> {
+}
+
 impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceCaffePool2dOperator<S, IoBuf> {
 }
 
@@ -206,6 +209,9 @@ impl<S, IoBuf: ?Sized> DeviceOperator for DevicePool2dOperator<S, IoBuf> {
     assert_eq!(0, arm);
     self.out.clone()
   }
+}
+
+impl<S, IoBuf: ?Sized> DiffOperatorData<S> for DevicePool2dOperator<S, IoBuf> {
 }
 
 impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DevicePool2dOperator<S, IoBuf> {

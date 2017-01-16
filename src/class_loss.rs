@@ -25,6 +25,7 @@ pub struct DeviceSoftmaxNLLClassLoss<S, IoBuf: ?Sized> /*where S: SampleLabel*/ 
   out:      DeviceOutput,
   batch_nr: Option<usize>,
   losses:   DeviceMem<f32>,
+  r_loss:   DeviceMem<f32>,
   probs:    DeviceMem<f32>,
   hats:     DeviceMem<u32>,
   nsamples: usize,
@@ -33,8 +34,8 @@ pub struct DeviceSoftmaxNLLClassLoss<S, IoBuf: ?Sized> /*where S: SampleLabel*/ 
   accuracy: usize,
   labels:       DeviceMem<u32>,
   weights:      DeviceMem<f32>,
-  grad_weights: DeviceMem<f32>,
-  targets:      DeviceMem<f32>,
+  //grad_weights: DeviceMem<f32>,
+  jac_targ: DeviceMem<f32>,
   labels_h: Vec<u32>,
   ws_h:     Vec<f32>,
   ts_h:     Vec<f32>,
@@ -51,8 +52,8 @@ impl<S, IoBuf: ?Sized> DeviceSoftmaxNLLClassLoss<S, IoBuf> /*where S: SampleLabe
     //labels.as_mut().set_constant(0xffff_ffff, stream.conn());
     let mut weights = DeviceMem::zeros(cfg.batch_sz, stream.conn());
     weights.as_mut().set_constant(1.0, stream.conn());
-    let mut grad_weights = DeviceMem::zeros(cfg.batch_sz, stream.conn());
-    grad_weights.as_mut().set_constant(1.0, stream.conn());
+    /*let mut grad_weights = DeviceMem::zeros(cfg.batch_sz, stream.conn());
+    grad_weights.as_mut().set_constant(1.0, stream.conn());*/
     let mut targets = DeviceMem::zeros(cfg.batch_sz, stream.conn());
     targets.as_mut().set_constant(1.0, stream.conn());
     let mut labels_h = Vec::with_capacity(cfg.batch_sz);
@@ -76,6 +77,7 @@ impl<S, IoBuf: ?Sized> DeviceSoftmaxNLLClassLoss<S, IoBuf> /*where S: SampleLabe
       out:      DeviceOutput::new(cfg.batch_sz, 1, cap, stream.conn()),
       batch_nr: None,
       losses:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      r_loss:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
       probs:    DeviceMem::zeros(cfg.batch_sz * cfg.num_classes, stream.conn()),
       hats:     DeviceMem::zeros(cfg.batch_sz, stream.conn()),
       nsamples: 0,
@@ -84,8 +86,8 @@ impl<S, IoBuf: ?Sized> DeviceSoftmaxNLLClassLoss<S, IoBuf> /*where S: SampleLabe
       accuracy: 0,
       labels:       labels,
       weights:      weights,
-      grad_weights: grad_weights,
-      targets:      targets,
+      //grad_weights: grad_weights,
+      jac_targ: targets,
       labels_h: labels_h,
       ws_h:     ws_h,
       ts_h:     ts_h,
@@ -122,8 +124,13 @@ impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLoss<Sa
     self.acc_loss + self.reg_loss
   }
 
-  fn set_grad_weight_with_r_loss(&mut self) {
-    unimplemented!();
+  fn set_jacobian_target_with_r_loss(&mut self) {
+    let batch_sz = self.out.batch_sz.get();
+    self.jac_targ.as_mut().reshape_mut(batch_sz).copy(self.r_loss.as_ref().reshape(batch_sz), self.stream.conn());
+  }
+
+  fn r_gauss_newton_transform(&mut self) {
+    // For NLL losses, the Gauss-Newton transform is an identity.
   }
 
   fn _store_accuracy(&mut self) -> usize {
@@ -142,6 +149,39 @@ impl<IoBuf: ?Sized> DiffNLLLoss<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLoss
 
   fn store_kl_divergence_to_cached(&mut self) -> f32 {
     unimplemented!();
+  }
+}
+
+impl<S, IoBuf: ?Sized> DiffOperatorData<S> for DeviceSoftmaxNLLClassLoss<S, IoBuf> {
+  default fn _load_batch(&mut self, samples: &[S]) {
+    unimplemented!();
+  }
+}
+
+impl<IoBuf: ?Sized> DiffOperatorData<SampleItem> for DeviceSoftmaxNLLClassLoss<SampleItem, IoBuf> {
+  fn _load_batch(&mut self, samples: &[SampleItem]) {
+    let actual_batch_size = samples.len();
+    assert!(actual_batch_size <= self.cfg.batch_sz);
+    for (idx, sample) in samples.iter().enumerate() {
+      if sample.kvs.contains::<SampleClassLabelKey>() {
+        let cat = *sample.kvs.get::<SampleClassLabelKey>().unwrap();
+        assert!(cat < self.cfg.num_classes as u32);
+        assert!(cat != u32::MAX);
+        self.labels_h[idx] = cat;
+      } else {
+        self.labels_h[idx] = u32::MAX;
+      }
+      if sample.kvs.contains::<SampleWeightKey>() {
+        let weight = *sample.kvs.get::<SampleWeightKey>().unwrap();
+        self.ws_h[idx] = weight;
+      } else {
+        self.ws_h[idx] = 1.0;
+      }
+    }
+    self.labels.as_mut().load_sync(&self.labels_h, self.stream.conn());
+    self.weights.as_mut().load_sync(&self.ws_h, self.stream.conn());
+    self.out.batch_sz.set(actual_batch_size);
+    self.batch_nr = Some(self.batch_nr.map_or(0, |batch| batch + 1));
   }
 }
 
@@ -186,31 +226,6 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLos
     self.accuracy = 0;*/
   }
 
-  fn _load_batch(&mut self, samples: &[SampleItem]) {
-    let actual_batch_size = samples.len();
-    assert!(actual_batch_size <= self.cfg.batch_sz);
-    for (idx, sample) in samples.iter().enumerate() {
-      if sample.kvs.contains::<SampleClassLabelKey>() {
-        let cat = *sample.kvs.get::<SampleClassLabelKey>().unwrap();
-        assert!(cat < self.cfg.num_classes as u32);
-        assert!(cat != u32::MAX);
-        self.labels_h[idx] = cat;
-      } else {
-        self.labels_h[idx] = u32::MAX;
-      }
-      if sample.kvs.contains::<SampleWeightKey>() {
-        let weight = *sample.kvs.get::<SampleWeightKey>().unwrap();
-        self.ws_h[idx] = weight;
-      } else {
-        self.ws_h[idx] = 1.0;
-      }
-    }
-    self.labels.as_mut().load_sync(&self.labels_h, self.stream.conn());
-    self.weights.as_mut().load_sync(&self.ws_h, self.stream.conn());
-    self.out.batch_sz.set(actual_batch_size);
-    self.batch_nr = Some(self.batch_nr.map_or(0, |batch| batch + 1));
-  }
-
   fn _forward(&mut self, _phase: OpPhase) {
     let batch_size = self.in_.batch_sz.get();
     assert_eq!(batch_size, self.out.batch_sz.get());
@@ -222,7 +237,6 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLos
         in_buf.as_ref(),
         self.labels.as_ref(),
         self.weights.as_ref(),
-        self.targets.as_ref(),
         self.hats.as_mut(),
         self.probs.as_mut(),
         out_buf.as_mut(),
@@ -254,7 +268,7 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLos
           self.probs.as_ref(),
           self.labels.as_ref(),
           self.weights.as_ref(),
-          self.targets.as_ref(),
+          self.jac_targ.as_ref(),
           in_grad.as_mut(),
           self.stream.conn(),
       );
@@ -269,6 +283,7 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLos
         self.probs.as_ref(),
         self.labels.as_ref(),
         self.weights.as_ref(),
+        self.jac_targ.as_ref(),
         in_grad2.as_mut(),
         self.stream.conn(),
     );
@@ -378,6 +393,38 @@ impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceLogisticNLLClassLoss<S
   }
 }
 
+impl<S, IoBuf: ?Sized> DiffOperatorData<S> for DeviceLogisticNLLClassLoss<S, IoBuf> {
+  default fn _load_batch(&mut self, samples: &[S]) {
+    unimplemented!();
+  }
+}
+
+impl<IoBuf: ?Sized> DiffOperatorData<SampleItem> for DeviceLogisticNLLClassLoss<SampleItem, IoBuf> {
+  fn _load_batch(&mut self, samples: &[SampleItem]) {
+    let actual_batch_size = samples.len();
+    assert!(actual_batch_size <= self.cfg.batch_sz);
+    for (idx, sample) in samples.iter().enumerate() {
+      if sample.kvs.contains::<SampleClassLabelKey>() {
+        let cat = *sample.kvs.get::<SampleClassLabelKey>().unwrap();
+        assert!(cat < 2);
+        self.labels_h[idx] = cat;
+      } else {
+        self.labels_h[idx] = u32::MAX;
+      }
+      if sample.kvs.contains::<SampleWeightKey>() {
+        let weight = *sample.kvs.get::<SampleWeightKey>().unwrap();
+        self.ws_h[idx] = weight;
+      } else {
+        self.ws_h[idx] = 1.0;
+      }
+    }
+    self.labels.as_mut().load_sync(&self.labels_h, self.stream.conn());
+    self.weights.as_mut().load_sync(&self.ws_h, self.stream.conn());
+    self.out.batch_sz.set(actual_batch_size);
+    self.batch_nr = Some(self.batch_nr.map_or(0, |batch| batch + 1));
+  }
+}
+
 impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceLogisticNLLClassLoss<S, IoBuf> {
 }
 
@@ -414,30 +461,6 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceLogisticNLLClassLo
 
   fn _next_iteration(&mut self) {
     self.batch_nr = None;
-  }
-
-  fn _load_batch(&mut self, samples: &[SampleItem]) {
-    let actual_batch_size = samples.len();
-    assert!(actual_batch_size <= self.cfg.batch_sz);
-    for (idx, sample) in samples.iter().enumerate() {
-      if sample.kvs.contains::<SampleClassLabelKey>() {
-        let cat = *sample.kvs.get::<SampleClassLabelKey>().unwrap();
-        assert!(cat < 2);
-        self.labels_h[idx] = cat;
-      } else {
-        self.labels_h[idx] = u32::MAX;
-      }
-      if sample.kvs.contains::<SampleWeightKey>() {
-        let weight = *sample.kvs.get::<SampleWeightKey>().unwrap();
-        self.ws_h[idx] = weight;
-      } else {
-        self.ws_h[idx] = 1.0;
-      }
-    }
-    self.labels.as_mut().load_sync(&self.labels_h, self.stream.conn());
-    self.weights.as_mut().load_sync(&self.ws_h, self.stream.conn());
-    self.out.batch_sz.set(actual_batch_size);
-    self.batch_nr = Some(self.batch_nr.map_or(0, |batch| batch + 1));
   }
 
   fn _forward(&mut self, _phase: OpPhase) {

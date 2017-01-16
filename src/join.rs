@@ -55,6 +55,9 @@ impl<S, IoBuf: ?Sized> DeviceOperator for DeviceAddJoinOperator<S, IoBuf> {
   }
 }
 
+impl<S, IoBuf: ?Sized> DiffOperatorData<S> for DeviceAddJoinOperator<S, IoBuf> {
+}
+
 impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceAddJoinOperator<S, IoBuf> {
 }
 

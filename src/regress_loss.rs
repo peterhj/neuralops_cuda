@@ -16,6 +16,21 @@ use std::cell::{RefCell};
 //use std::marker::{PhantomData};
 use std::rc::{Rc};
 
+pub struct DeviceLstSqLoss<S, IoBuf: ?Sized> {
+  node:     OperatorNode,
+  stream:   DeviceStream,
+  in_op:    Rc<RefCell<DiffOperator<S, IoBuf>>>,
+  in_:      DeviceOutput,
+  out:      DeviceOutput,
+  loss:     DeviceMem<f32>,
+  r_loss:   DeviceMem<f32>,
+  target:   DeviceMem<f32>,
+  weight:   DeviceMem<u32>,
+  jac_targ: DeviceMem<f32>,
+  h_target: AsyncMem<f32>,
+  h_weight: AsyncMem<f32>,
+}
+
 pub struct DeviceIndLstSqRegressLoss<S, IoBuf: ?Sized> {
   cfg:      IndLstSqRegressLossConfig,
   node:     OperatorNode,
@@ -143,6 +158,46 @@ impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceIndLstSqRegressLoss<Sa
   }
 }
 
+impl<S, IoBuf: ?Sized> DiffOperatorData<S> for DeviceIndLstSqRegressLoss<S, IoBuf> {
+  default fn _load_batch(&mut self, samples: &[S]) {
+    unimplemented!();
+  }
+}
+
+impl<IoBuf: ?Sized> DiffOperatorData<SampleItem> for DeviceIndLstSqRegressLoss<SampleItem, IoBuf> {
+  fn _load_batch(&mut self, samples: &[SampleItem]) {
+    let actual_batch_size = samples.len();
+    assert!(actual_batch_size <= self.cfg.batch_sz);
+    for (idx, sample) in samples.iter().enumerate() {
+      if sample.kvs.contains::<SampleRegressTargetKey>() {
+        let target = *sample.kvs.get::<SampleRegressTargetKey>().unwrap();
+        self.htargets[idx] = target;
+      } else {
+        self.htargets[idx] = 0.0;
+      }
+      if sample.kvs.contains::<SampleClassLabelKey>() {
+        let cat = *sample.kvs.get::<SampleClassLabelKey>().unwrap();
+        assert!(cat < self.cfg.index_sz as u32);
+        assert!(cat != u32::MAX);
+        self.labels_h[idx] = cat;
+      } else {
+        self.labels_h[idx] = u32::MAX;
+      }
+      if sample.kvs.contains::<SampleWeightKey>() {
+        let weight = *sample.kvs.get::<SampleWeightKey>().unwrap();
+        self.ws_h[idx] = weight;
+      } else {
+        self.ws_h[idx] = 1.0;
+      }
+    }
+    self.targets.as_mut().load_sync(&self.htargets, self.stream.conn());
+    self.labels.as_mut().load_sync(&self.labels_h, self.stream.conn());
+    self.weights.as_mut().load_sync(&self.ws_h, self.stream.conn());
+    self.out.batch_sz.set(actual_batch_size);
+    self.batch_nr = Some(self.batch_nr.map_or(0, |batch| batch + 1));
+  }
+}
+
 impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceIndLstSqRegressLoss<S, IoBuf> {
 }
 
@@ -179,38 +234,6 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceIndLstSqRegressLos
 
   fn _next_iteration(&mut self) {
     self.batch_nr = None;
-  }
-
-  fn _load_batch(&mut self, samples: &[SampleItem]) {
-    let actual_batch_size = samples.len();
-    assert!(actual_batch_size <= self.cfg.batch_sz);
-    for (idx, sample) in samples.iter().enumerate() {
-      if sample.kvs.contains::<SampleRegressTargetKey>() {
-        let target = *sample.kvs.get::<SampleRegressTargetKey>().unwrap();
-        self.htargets[idx] = target;
-      } else {
-        self.htargets[idx] = 0.0;
-      }
-      if sample.kvs.contains::<SampleClassLabelKey>() {
-        let cat = *sample.kvs.get::<SampleClassLabelKey>().unwrap();
-        assert!(cat < self.cfg.index_sz as u32);
-        assert!(cat != u32::MAX);
-        self.labels_h[idx] = cat;
-      } else {
-        self.labels_h[idx] = u32::MAX;
-      }
-      if sample.kvs.contains::<SampleWeightKey>() {
-        let weight = *sample.kvs.get::<SampleWeightKey>().unwrap();
-        self.ws_h[idx] = weight;
-      } else {
-        self.ws_h[idx] = 1.0;
-      }
-    }
-    self.targets.as_mut().load_sync(&self.htargets, self.stream.conn());
-    self.labels.as_mut().load_sync(&self.labels_h, self.stream.conn());
-    self.weights.as_mut().load_sync(&self.ws_h, self.stream.conn());
-    self.out.batch_sz.set(actual_batch_size);
-    self.batch_nr = Some(self.batch_nr.map_or(0, |batch| batch + 1));
   }
 
   fn _forward(&mut self, _phase: OpPhase) {
