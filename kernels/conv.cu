@@ -1,4 +1,5 @@
 #include <cuda_runtime_api.h>
+#include <stdint.h>
 
 #define OFFSET_BANK(idx) ({ __typeof__ (idx) _idx = idx; ((_idx) + ((_idx) / 32)); })
 
@@ -265,4 +266,45 @@ extern "C" void neuralops_cuda_conv2d_scale_bwd(
   int n = 32 * num_channels * block_spatial_dim * batch_size;
   conv_diag_affine_bwd_batch_kernel<<<(n+1024-1)/1024, 1024, 0, stream>>>(
       in_act, spatial_dim, num_channels, batch_size, out_delta, scale, scale_grad, bias_grad, in_delta);
+}
+
+__global__ void conv_scale_rfwd_kernel(
+    const float *in_val,
+    uint32_t spatial_dim,
+    uint32_t num_channels,
+    uint32_t batch_size,
+    const float *in_r_val,
+    const float *scale,
+    const float *scale_r_dir,
+    const float *bias_r_dir,
+    float *out_r_val)
+{
+  uint32_t idx = threadIdx.x + blockIdx.x * blockDim.x;
+  uint32_t u = idx % spatial_dim;
+  uint32_t c = (idx / spatial_dim) % num_channels;
+  uint32_t batch_idx = idx / (spatial_dim * num_channels);
+  if (u < spatial_dim && c < num_channels && batch_idx < batch_size) {
+    float alpha = scale[c];
+    float r_alpha = scale_r_dir[c];
+    float r_beta = bias_r_dir[c];
+    float r_y = alpha * in_r_val[idx] + r_alpha * in_val[idx] + r_beta;
+    out_r_val[idx] = r_y;
+  }
+}
+
+extern "C" void neuralops_cuda_conv_scale_rfwd(
+    const float *in_val,
+    size_t spatial_dim,
+    size_t num_channels,
+    size_t batch_size,
+    const float *in_r_val,
+    const float *scale,
+    const float *scale_r_dir,
+    const float *bias_r_dir,
+    float *out_r_val,
+    cudaStream_t stream)
+{
+  uint32_t n = spatial_dim * num_channels * batch_size;
+  conv_scale_rfwd_kernel<<<(n+1024-1)/1024, 1024, 0, stream>>>(
+      in_val, spatial_dim, num_channels, batch_size, in_r_val, scale, scale_r_dir, bias_r_dir, out_r_val);
 }

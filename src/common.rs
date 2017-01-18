@@ -1,49 +1,51 @@
 use devicemem_cuda::prelude::*;
-use operator::{OpCapability};
+use operator::prelude::*;
 
 use std::cell::{Cell, RefCell, RefMut};
 use std::rc::{Rc};
 
 pub trait DeviceOperator {
   fn _output(&self, arm: usize) -> DeviceOutput;
-  fn _dev_load_diff_param<'a>(&mut self, init_offset: usize, param_reader: &mut DeviceMemRefMut<'a, f32>) -> usize { 0 }
+  /*fn _dev_load_diff_param<'a>(&mut self, init_offset: usize, param_reader: &mut DeviceMemRefMut<'a, f32>) -> usize { 0 }
   fn _dev_store_diff_param<'a>(&mut self, init_offset: usize, param_writer: &mut DeviceMemRefMut<'a, f32>) -> usize { 0 }
-  fn _dev_store_grad<'a>(&mut self, init_offset: usize, grad_writer: &mut DeviceMemRefMut<'a, f32>) -> usize { 0 }
+  fn _dev_store_grad<'a>(&mut self, init_offset: usize, grad_writer: &mut DeviceMemRefMut<'a, f32>) -> usize { 0 }*/
 }
 
 #[derive(Clone)]
 pub struct DeviceOutput {
   data_dim:     usize,
+  batch_cap:    usize,
   pub batch_sz: Rc<Cell<usize>>,
   pub buf:      Rc<RefCell<DeviceMem<f32>>>,
   pub grad:     Option<Rc<RefCell<DeviceMem<f32>>>>,
   pub grad2:    Rc<RefCell<Option<DeviceMem<f32>>>>,
   pub r_data:   Rc<RefCell<Option<DeviceMem<f32>>>>,
   pub r_grad:   Rc<RefCell<Option<DeviceMem<f32>>>>,
+  pub data:     Rc<VarBlock<DeviceMem<f32>>>,
 }
 
 impl DeviceOutput {
-  pub fn new(batch_size: usize, data_dim: usize, cap: OpCapability, conn: DeviceConn) -> Self {
+  pub fn new(batch_size: usize, data_dim: usize, cap: OpCapability, stream: DeviceStream) -> Self {
     let out_len = batch_size * data_dim;
-    let out_buf = Rc::new(RefCell::new(DeviceMem::zeros(out_len, conn.clone())));
+    let out_buf = Rc::new(RefCell::new(DeviceMem::zeros(out_len, stream.conn())));
     let out_grad = if cap.enable_backward() {
-      Some(Rc::new(RefCell::new(DeviceMem::zeros(out_len, conn.clone()))))
+      Some(Rc::new(RefCell::new(DeviceMem::zeros(out_len, stream.conn()))))
     } else {
       None
     };
-    /*let r_data = if cap.enable_r_forward() {
-      Some(Rc::new(RefCell::new(DeviceMem::zeros(out_len, conn.clone()))))
-    } else {
-      None
-    };*/
     DeviceOutput{
-      data_dim: data_dim,
+      data_dim:     data_dim,
+      batch_cap:    batch_size,
       batch_sz: Rc::new(Cell::new(batch_size)),
       buf:      out_buf,
       grad:     out_grad,
       grad2:    Rc::new(RefCell::new(None)),
       r_data:   Rc::new(RefCell::new(None)),
       r_grad:   Rc::new(RefCell::new(None)),
+      data:     VarBlock::new(DefaultVarAllocator::new({
+        let stream = stream.clone();
+        move || DeviceMem::zeros(out_len, stream.conn())
+      })),
     }
   }
 

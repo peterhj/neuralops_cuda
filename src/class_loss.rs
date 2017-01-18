@@ -1,6 +1,6 @@
 use prelude::*;
 use kernels::*;
-use softmax::{DeviceSoftmaxKernel};
+use softmax::{DeviceSoftmaxNLLKernel};
 
 use densearray::prelude::*;
 use devicemem_cuda::prelude::*;
@@ -42,7 +42,7 @@ pub struct DeviceSoftmaxNLLClassLoss<S, IoBuf: ?Sized> /*where S: SampleLabel*/ 
   hats_h:   Vec<u32>,
   probs_h:  Vec<f32>,
   losses_h: Vec<f32>,
-  softmax:  DeviceSoftmaxKernel,
+  softmax:  DeviceSoftmaxNLLKernel,
 }
 
 impl<S, IoBuf: ?Sized> DeviceSoftmaxNLLClassLoss<S, IoBuf> /*where S: SampleLabel*/ {
@@ -74,7 +74,7 @@ impl<S, IoBuf: ?Sized> DeviceSoftmaxNLLClassLoss<S, IoBuf> /*where S: SampleLabe
       stream:   stream.clone(),
       in_op:    prev_op,
       in_:      in_,
-      out:      DeviceOutput::new(cfg.batch_sz, 1, cap, stream.conn()),
+      out:      DeviceOutput::new(cfg.batch_sz, 1, cap, stream.clone()),
       batch_nr: None,
       losses:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
       r_loss:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
@@ -94,7 +94,7 @@ impl<S, IoBuf: ?Sized> DeviceSoftmaxNLLClassLoss<S, IoBuf> /*where S: SampleLabe
       hats_h:   hats_h,
       probs_h:  probs_h,
       losses_h: losses_h,
-      softmax:  DeviceSoftmaxKernel::new(cfg.batch_sz, cfg.num_classes, stream.conn()),
+      softmax:  DeviceSoftmaxNLLKernel::new(cfg.batch_sz, cfg.num_classes, stream.conn()),
     }))
   }
 }
@@ -243,6 +243,7 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLos
         self.stream.conn(),
     );
 
+    // FIXME(20170118): should not store to host synchronously each batch!
     out_buf.as_ref().store_sync(&mut self.losses_h, self.stream.conn());
     self.hats.as_ref().store_sync(&mut self.hats_h, self.stream.conn());
     self.probs.as_ref().store_sync(&mut self.probs_h, self.stream.conn());
@@ -287,6 +288,14 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLos
         in_grad2.as_mut(),
         self.stream.conn(),
     );
+  }
+
+  fn _r_forward(&mut self) {
+    unimplemented!();
+  }
+
+  fn _r_backward(&mut self) {
+    unimplemented!();
   }
 }
 
@@ -341,7 +350,7 @@ impl<S, IoBuf: ?Sized> DeviceLogisticNLLClassLoss<S, IoBuf> {
       stream:   stream.clone(),
       in_op:    prev_op,
       in_:      in_,
-      out:      DeviceOutput::new(cfg.batch_sz, 1, cap, stream.conn()),
+      out:      DeviceOutput::new(cfg.batch_sz, 1, cap, stream.clone()),
       batch_nr: None,
       nsamples: 0,
       acc_loss: 0.0,

@@ -40,7 +40,7 @@ impl<S> DeviceVarInputOperator<S> {
     let mut h_buf = Vec::with_capacity(batch_sz * max_stride * dtype_sz);
     h_buf.resize(batch_sz * max_stride * dtype_sz, 0);
     let tmp_buf = DeviceMem::zeros(batch_sz * max_stride, stream.conn());
-    let out = DeviceOutput::new(batch_sz, max_stride, cap, stream.conn());
+    let out = DeviceOutput::new(batch_sz, max_stride, cap, stream.clone());
     Rc::new(RefCell::new(DeviceVarInputOperator{
       cfg:      cfg,
       node:     OperatorNode::default(),

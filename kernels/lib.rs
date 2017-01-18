@@ -23,6 +23,12 @@ extern "C" {
       out_delta: *const f32,
       in_delta: *mut f32,
       stream: cudaStream_t);
+  pub fn neuralops_cuda_activate_rect_rfwd(
+      in_val: *const f32,
+      dim: size_t,
+      in_r_val: *const f32,
+      out_r_val: *mut f32,
+      stream: cudaStream_t);
   pub fn neuralops_cuda_activate_leakrect_fwd(
       in_act: *const f32,
       dim: size_t,
@@ -80,6 +86,17 @@ extern "C" {
       scale_grad: *mut f32,
       bias_grad: *mut f32,
       in_grad: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_conv_scale_rfwd(
+      in_val: *const f32,
+      spatial_dim: size_t,
+      num_channels: size_t,
+      batch_size: size_t,
+      in_r_val: *const f32,
+      scale: *const f32,
+      scale_r_dir: *const f32,
+      bias_r_dir: *const f32,
+      out_r_val: *mut f32,
       stream: cudaStream_t);
 
   pub fn neuralops_cuda_caffe_im2col(
@@ -299,5 +316,13 @@ extern "C" {
       weights: *const f32,
       jac_targ: *const f32,
       in_delta2: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_softmax_nll_loss_rfwd(
+      out_r_val: *const f32,
+      num_classes: size_t,
+      batch_size: size_t,
+      r_mean: *const f32,
+      labels: *const u32,
+      r_loss: *mut f32,
       stream: cudaStream_t);
 }

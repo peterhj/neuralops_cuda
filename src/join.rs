@@ -29,7 +29,7 @@ impl<S, IoBuf: ?Sized> DeviceAddJoinOperator<S, IoBuf> {
       stream:   stream.clone(),
       in_ops:   in_ops,
       in_:      in_,
-      out:      DeviceOutput::new(cfg.batch_sz, cfg.dim, cap, stream.conn()),
+      out:      DeviceOutput::new(cfg.batch_sz, cfg.dim, cap, stream.clone()),
     }))
   }
 

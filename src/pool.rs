@@ -37,7 +37,7 @@ impl<S, IoBuf: ?Sized> DeviceCaffePool2dOperator<S, IoBuf> {
       stream:   stream.clone(),
       in_op:    prev_op,
       in_:      in_,
-      out:      DeviceOutput::new(cfg.batch_sz, cfg.out_dim().flat_len(), cap, stream.conn()),
+      out:      DeviceOutput::new(cfg.batch_sz, cfg.out_dim().flat_len(), cap, stream.clone()),
     }))
   }
 }
@@ -186,7 +186,7 @@ impl<S, IoBuf: ?Sized> DevicePool2dOperator<S, IoBuf> {
       stream:   stream.clone(),
       in_op:    prev_op,
       in_:      in_,
-      out:      DeviceOutput::new(cfg.batch_sz, cfg.out_dim().flat_len(), cap, stream.conn()),
+      out:      DeviceOutput::new(cfg.batch_sz, cfg.out_dim().flat_len(), cap, stream.clone()),
       h_in:     h_in,
       h_out:    h_out,
       pooling:  pooling,

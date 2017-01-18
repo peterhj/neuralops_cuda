@@ -24,7 +24,7 @@ impl<S, IoBuf: ?Sized> DeviceCopySplitOperator<S, IoBuf> {
     let prev_out = prev_op.borrow()._output(prev_arm);
     let mut out = Vec::with_capacity(cfg.out_arms);
     for arm in 0 .. cfg.out_arms {
-      out.push(DeviceOutput::new(cfg.batch_sz, cfg.dim, cap, stream.conn()));
+      out.push(DeviceOutput::new(cfg.batch_sz, cfg.dim, cap, stream.clone()));
     }
     Rc::new(RefCell::new(DeviceCopySplitOperator{
       cfg:      cfg,

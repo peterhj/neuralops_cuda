@@ -90,7 +90,7 @@ impl<S, IoBuf: ?Sized> DeviceIndLstSqRegressLoss<S, IoBuf> {
       stream:   stream.clone(),
       in_op:    prev_op,
       in_:      in_,
-      out:      DeviceOutput::new(cfg.batch_sz, 1, cap, stream.conn()),
+      out:      DeviceOutput::new(cfg.batch_sz, 1, cap, stream.clone()),
       batch_nr: None,
       losses:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
       //probs:    DeviceMem::zeros(cfg.batch_sz * cfg.index_sz, stream.conn()),
