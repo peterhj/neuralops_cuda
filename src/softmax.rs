@@ -232,8 +232,8 @@ impl DeviceSoftmaxNLLKernel {
     self.sum_factor.as_ref().post(&conn);
     self.sum_r_factor.as_ref().post(&conn);
 
-    self.r_mean.as_mut().copy(self.r_factor.as_ref(), conn.clone());
-    self.r_mean.as_mut().reshape_mut(batch_size).elem_div(self.sum_r_factor.as_ref().reshape(batch_size), conn.clone());
+    self.r_mean.as_mut().copy(self.sum_r_factor.as_ref(), conn.clone());
+    self.r_mean.as_mut().reshape_mut(batch_size).elem_div(self.sum_factor.as_ref().reshape(batch_size), conn.clone());
 
     in_r_val.wait(&conn);
     labels.wait(&conn);

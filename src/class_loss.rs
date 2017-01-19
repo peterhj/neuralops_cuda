@@ -291,7 +291,18 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLos
   }
 
   fn _r_forward(&mut self) {
-    unimplemented!();
+    let batch_size = self.in_.batch_sz.get();
+    assert_eq!(batch_size, self.out.batch_sz.get());
+
+    let in_val = self.in_.buf.borrow();
+    self.softmax._r_forward(
+        batch_size,
+        in_val.as_ref(),
+        self.in_.data.r_val.as_ref().as_ref(),
+        self.labels.as_ref(),
+        self.r_loss.as_mut(),
+        self.stream.conn(),
+    );
   }
 
   fn _r_backward(&mut self) {

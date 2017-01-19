@@ -706,6 +706,10 @@ impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceConv2dOperator<S, IoBuf> 
   default fn _store_grad(&mut self, init_offset: usize, grad_writer: &mut IoBuf) -> usize {
     unimplemented!();
   }
+
+  default fn _load_direction(&mut self, init_offset: usize, dir_reader: &mut IoBuf) -> usize {
+    unimplemented!();
+  }
 }
 
 impl<S> DiffOperatorIo<[f32]> for DeviceConv2dOperator<S, [f32]> {
@@ -741,6 +745,15 @@ impl<S> DiffOperatorIo<[f32]> for DeviceConv2dOperator<S, [f32]> {
     let mut offset = init_offset;
     offset += grad_writer.write_buf(offset, self.hweights.as_slice());
     offset += grad_writer.write_buf(offset, self.hbias.as_slice());
+    offset - init_offset
+  }
+
+  fn _load_direction(&mut self, init_offset: usize, dir_reader: &mut [f32]) -> usize {
+    let mut offset = init_offset;
+    self.weights.r_dir.as_mut().as_view_mut().load_sync(dir_reader[offset .. ].reshape((self.cfg.kernel_w, self.cfg.kernel_h, self.cfg.in_dim.2, self.cfg.out_chan)), self.stream.conn());
+    offset += self.cfg.kernel_w * self.cfg.kernel_h * self.cfg.in_dim.2 * self.cfg.out_chan;
+    self.bias.r_dir.as_mut().as_view_mut().load_sync(dir_reader[offset .. ].reshape(self.cfg.out_chan), self.stream.conn());
+    offset += self.cfg.out_chan;
     offset - init_offset
   }
 }
@@ -958,8 +971,6 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
   fn _r_forward(&mut self) {
     let batch_size = self.in_.batch_sz.get();
 
-    // FIXME(20170117)
-
     let in_buf = self.in_.buf.borrow();
     in_buf.as_ref().wait(&self.stream.conn());
     self.in_.data.r_val.as_ref().as_ref().wait(&self.stream.conn());
@@ -1011,7 +1022,6 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
     self.tmp.r_val.as_mut().as_ref().post(&self.stream.conn());
     self.scratch.as_ref().post(&self.stream.conn());
 
-    //let mut out_buf = self.out.buf.borrow_mut();
     self.act_kern._r_forward(batch_size, self.tmp_buf.as_ref(), self.tmp.r_val.as_ref().as_ref(), self.out.data.r_val.as_mut().as_mut(), self.stream.conn());
   }
 

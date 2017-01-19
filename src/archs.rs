@@ -12,6 +12,86 @@ const BATCH_NORM_EPSILON:   f32 = 1.0e-6;
 
 const INFOGAN_LEAKINESS:    f32 = 0.01;
 
+pub fn build_cifar10_simpleconv_loss<IoBuf: ?Sized + 'static>(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<SampleItem, IoBuf>>> {
+  let input_cfg = VarInputOperatorConfig{
+    batch_sz:   batch_sz,
+    max_stride: 32 * 32 * 3,
+    out_dim:    (32, 32, 3),
+    //in_dtype:   Dtype::F32,
+    in_dtype:   Dtype::U8,
+    preprocs:   vec![
+      // XXX: the pixel mean is:
+      // (1.25306915e2 1.2295039e2 1.1386535e2).
+      //VarInputPreproc::ChannelShift{shift: vec![125.0, 123.0, 114.0]},
+      VarInputPreproc::Scale{scale: 1.0 / 255.0},
+    ],
+  };
+  let conv1_cfg = Conv2dOperatorConfig{
+    batch_sz:   batch_sz,
+    in_dim:     (32, 32, 3),
+    kernel_w:   3,  kernel_h:   3,
+    stride_w:   1,  stride_h:   1,
+    pad_w:      1,  pad_h:      1,
+    out_chan:   16,
+    bias:       true,
+    act_kind:   ActivationKind::Rect,
+    w_init:     ParamInitKind::Kaiming,
+  };
+  let conv2_cfg = Conv2dOperatorConfig{
+    batch_sz:   batch_sz,
+    in_dim:     (32, 32, 16),
+    kernel_w:   3,  kernel_h:   3,
+    stride_w:   2,  stride_h:   2,
+    pad_w:      1,  pad_h:      1,
+    out_chan:   32,
+    bias:       true,
+    act_kind:   ActivationKind::Rect,
+    w_init:     ParamInitKind::Kaiming,
+  };
+  let conv3_cfg = Conv2dOperatorConfig{
+    batch_sz:   batch_sz,
+    in_dim:     (16, 16, 32),
+    kernel_w:   3,  kernel_h:   3,
+    stride_w:   2,  stride_h:   2,
+    pad_w:      1,  pad_h:      1,
+    out_chan:   32,
+    bias:       true,
+    act_kind:   ActivationKind::Rect,
+    w_init:     ParamInitKind::Kaiming,
+  };
+  let conv4_cfg = Conv2dOperatorConfig{
+    batch_sz:   batch_sz,
+    in_dim:     (8, 8, 32),
+    kernel_w:   3,  kernel_h:   3,
+    stride_w:   2,  stride_h:   2,
+    pad_w:      1,  pad_h:      1,
+    out_chan:   32,
+    bias:       true,
+    act_kind:   ActivationKind::Rect,
+    w_init:     ParamInitKind::Kaiming,
+  };
+  let affine_cfg = AffineOperatorConfig{
+    batch_sz:   batch_sz,
+    in_dim:     512,
+    out_dim:    10,
+    bias:       false,
+    act_kind:   ActivationKind::Identity,
+    w_init:     ParamInitKind::Kaiming,
+  };
+  let loss_cfg = ClassLossConfig{
+    batch_sz:       batch_sz,
+    num_classes:    10,
+  };
+  let input = DeviceVarInputOperator::new(input_cfg, OpCapability::Backward, stream.clone());
+  let conv1 = DeviceConv2dOperator::new(conv1_cfg, OpCapability::Backward, input, 0, stream.clone());
+  let conv2 = DeviceConv2dOperator::new(conv2_cfg, OpCapability::Backward, conv1, 0, stream.clone());
+  let conv3 = DeviceConv2dOperator::new(conv3_cfg, OpCapability::Backward, conv2, 0, stream.clone());
+  let conv4 = DeviceConv2dOperator::new(conv4_cfg, OpCapability::Backward, conv3, 0, stream.clone());
+  let affine = DeviceAffineOperator::new(affine_cfg, OpCapability::Backward, conv4, 0, stream.clone());
+  let loss = DeviceSoftmaxNLLClassLoss::new(loss_cfg, OpCapability::Backward, affine, 0, stream.clone());
+  loss
+}
+
 //pub fn build_cifar10_resnet20_loss<S>(batch_sz: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<S>>> where S: 'static + SampleDatum<[f32]> + SampleLabel {
 pub fn build_cifar10_resnet20_loss<IoBuf: ?Sized + 'static>(batch_sz: usize, augment: bool, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxNLLClassLoss<SampleItem, IoBuf>>> {
   let mut preprocs = vec![

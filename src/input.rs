@@ -371,6 +371,7 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceVarInputOperator<S
     let tmp = self.tmp_buf.as_ref().slice(0, batch_size * out_len);
     let mut out = out_buf.as_mut().slice_mut(0, batch_size * out_len);
     out.copy(tmp, self.stream.conn());
+    self.out.data.r_val.as_mut().as_mut().slice_mut(0, batch_size * out_len).set_constant(0.0, self.stream.conn());
   }
 
   fn _backward(&mut self) {

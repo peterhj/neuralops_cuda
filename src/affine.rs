@@ -97,6 +97,10 @@ impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceAffineOperator<S, IoBuf> 
   default fn _store_grad(&mut self, init_offset: usize, grad_writer: &mut IoBuf) -> usize {
     unimplemented!();
   }
+
+  default fn _load_direction(&mut self, init_offset: usize, dir_reader: &mut IoBuf) -> usize {
+    unimplemented!();
+  }
 }
 
 impl<S> DiffOperatorIo<[f32]> for DeviceAffineOperator<S, [f32]> {
@@ -129,6 +133,17 @@ impl<S> DiffOperatorIo<[f32]> for DeviceAffineOperator<S, [f32]> {
     if self.cfg.bias {
       self.bias.grad.as_ref().as_view().store_sync(self.hbias.as_view_mut(), self.stream.conn());
       offset += grad_writer.write_buf(offset, self.hbias.as_slice());
+    }
+    offset - init_offset
+  }
+
+  fn _load_direction(&mut self, init_offset: usize, dir_reader: &mut [f32]) -> usize {
+    let mut offset = init_offset;
+    offset += dir_reader.read_buf(offset, self.hweights.as_mut_slice());
+    self.weights.r_dir.as_mut().as_view_mut().load_sync(self.hweights.as_view(), self.stream.conn());
+    if self.cfg.bias {
+      offset += dir_reader.read_buf(offset, self.hbias.as_mut_slice());
+      self.bias.r_dir.as_mut().as_view_mut().load_sync(self.hbias.as_view(), self.stream.conn());
     }
     offset - init_offset
   }
@@ -417,7 +432,7 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceAffineOperator<S, IoBuf>
       unimplemented!();
     }
 
-    self.act_kern._r_forward(batch_size, self.tmp.val.as_ref().as_ref(), self.tmp.r_val.as_ref().as_ref(), self.out.data.r_val.as_mut().as_mut(), self.stream.conn());
+    self.act_kern._r_forward(batch_size, self.tmp_buf.as_ref(), self.tmp.r_val.as_ref().as_ref(), self.out.data.r_val.as_mut().as_mut(), self.stream.conn());
   }
 
   fn _r_backward(&mut self) {
