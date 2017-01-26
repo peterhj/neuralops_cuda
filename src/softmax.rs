@@ -270,17 +270,17 @@ pub struct DeviceSoftmaxKLKernel {
 }
 
 impl DeviceSoftmaxKLKernel {
-  pub fn new(batch_sz: usize, dim: usize, conn: DeviceConn) -> Self {
+  pub fn new(batch_sz: usize, dim: usize, stream: DeviceStream) -> Self {
     DeviceSoftmaxKLKernel{
       batch_sz:     batch_sz,
       dim:          dim,
-      logit:        DeviceMem::zeros(batch_sz * dim, conn.clone()),
-      max_logit:    DeviceMem::zeros(batch_sz, conn.clone()),
-      factor:       DeviceMem::zeros(batch_sz * dim, conn.clone()),
-      r_factor:     DeviceMem::zeros(batch_sz * dim, conn.clone()),
-      sum_factor:   DeviceMem::zeros(batch_sz, conn.clone()),
-      sum_r_factor: DeviceMem::zeros(batch_sz, conn.clone()),
-      r_mean:       DeviceMem::zeros(batch_sz, conn.clone()),
+      logit:        DeviceMem::zeros(batch_sz * dim, stream.conn()),
+      max_logit:    DeviceMem::zeros(batch_sz, stream.conn()),
+      factor:       DeviceMem::zeros(batch_sz * dim, stream.conn()),
+      r_factor:     DeviceMem::zeros(batch_sz * dim, stream.conn()),
+      sum_factor:   DeviceMem::zeros(batch_sz, stream.conn()),
+      sum_r_factor: DeviceMem::zeros(batch_sz, stream.conn()),
+      r_mean:       DeviceMem::zeros(batch_sz, stream.conn()),
     }
   }
 

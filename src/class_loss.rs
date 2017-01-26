@@ -16,6 +16,7 @@ use std::cell::{RefCell};
 //use std::marker::{PhantomData};
 use std::rc::{Rc};
 
+#[derive(Clone)]
 pub struct CategoricalKLLossConfig {
   pub batch_sz: usize,
   pub num_cats: usize,
@@ -34,16 +35,38 @@ pub struct DeviceSoftmaxKLLoss<S, IoBuf: ?Sized> {
   //acc_loss: f32,
   //weight:   DeviceMem<f32>,
   //jac_targ: DeviceMem<f32>,
-  h_target: Vec<f32>,
-  //h_weight: Vec<f32>,
   h_prob:   Vec<f32>,
   h_loss:   Vec<f32>,
+  h_target: Vec<f32>,
+  //h_weight: Vec<f32>,
   softmax:  DeviceSoftmaxKLKernel,
 }
 
 impl<S, IoBuf: ?Sized> DeviceSoftmaxKLLoss<S, IoBuf> {
   pub fn new<InOp>(cfg: CategoricalKLLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxKLLoss<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
-    unimplemented!();
+    let in_ = prev_op.borrow()._output(prev_arm);
+    let mut h_target = Vec::with_capacity(cfg.batch_sz * cfg.num_cats);
+    h_target.resize(cfg.batch_sz * cfg.num_cats, 0.0);
+    let mut h_prob = Vec::with_capacity(cfg.batch_sz * cfg.num_cats);
+    h_prob.resize(cfg.batch_sz * cfg.num_cats, 0.0);
+    let mut h_loss = Vec::with_capacity(cfg.batch_sz);
+    h_loss.resize(cfg.batch_sz, 0.0);
+    Rc::new(RefCell::new(DeviceSoftmaxKLLoss{
+      cfg:      cfg.clone(),
+      node:     OperatorNode::default(),
+      stream:   stream.clone(),
+      in_op:    prev_op,
+      in_:      in_,
+      //out:      DeviceOutput::new(cfg.batch_sz, 1, cap, stream.clone()),
+      prob:     DeviceMem::zeros(cfg.batch_sz * cfg.num_cats, stream.conn()),
+      loss:     DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      r_loss:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      target:   DeviceMem::zeros(cfg.batch_sz * cfg.num_cats, stream.conn()),
+      h_prob:   h_prob,
+      h_loss:   h_loss,
+      h_target: h_target,
+      softmax:  DeviceSoftmaxKLKernel::new(cfg.batch_sz, cfg.num_cats, stream.clone()),
+    }))
   }
 }
 
@@ -99,27 +122,17 @@ impl<S, IoBuf: ?Sized> DiffOperatorData<S> for DeviceSoftmaxKLLoss<S, IoBuf> {
 
 impl<IoBuf: ?Sized> DiffOperatorData<SampleItem> for DeviceSoftmaxKLLoss<SampleItem, IoBuf> {
   fn _load_batch(&mut self, samples: &[SampleItem]) {
-    // FIXME(20170125)
     let actual_batch_size = samples.len();
     assert!(actual_batch_size <= self.cfg.batch_sz);
     for (idx, sample) in samples.iter().enumerate() {
-      /*if sample.kvs.contains::<SampleClassLabelKey>() {
-        let cat = *sample.kvs.get::<SampleClassLabelKey>().unwrap();
-        assert!(cat < self.cfg.num_classes as u32);
-        assert!(cat != u32::MAX);
-        self.labels_h[idx] = cat;
+      if sample.kvs.contains::<SampleVectorTargetKey>() {
+        let target = sample.kvs.get::<SampleVectorTargetKey>().unwrap();
+        self.h_target[idx * self.cfg.num_cats .. (idx+1) * self.cfg.num_cats].copy_from_slice(target);
       } else {
-        self.labels_h[idx] = u32::MAX;
+        panic!("DeviceSoftmaxKLLoss requires a vector target");
       }
-      if sample.kvs.contains::<SampleWeightKey>() {
-        let weight = *sample.kvs.get::<SampleWeightKey>().unwrap();
-        self.ws_h[idx] = weight;
-      } else {
-        self.ws_h[idx] = 1.0;
-      }*/
     }
-    /*self.labels.as_mut().load_sync(&self.labels_h, self.stream.conn());
-    self.weights.as_mut().load_sync(&self.ws_h, self.stream.conn());*/
+    self.target.as_mut().load_sync(&self.h_target, self.stream.conn());
   }
 }
 
