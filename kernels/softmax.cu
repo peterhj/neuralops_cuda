@@ -23,10 +23,10 @@ __global__ void softmax_kl_loss_fwd_kernel(
     cache[OFFSET_BANK(j)] = 0.0f;
   }
   __syncthreads();
-  for (int s = 1; s < blockDim.x; s *= 2) {
+  for (uint32_t s = 1; s < blockDim.x; s *= 2) {
     if (j < dim && batch_idx < batch_sz) {
-      if (j % (2*s) == 0 && (j + s) < dim && cache[OFFSET_BANK(j)] < cache[OFFSET_BANK(j + s)]) {
-        cache[OFFSET_BANK(j)] = cache[OFFSET_BANK(j + s)];
+      if (j % (2*s) == 0 && (j + s) < dim) {
+        cache[OFFSET_BANK(j)] += cache[OFFSET_BANK(j + s)];
       }
     }
     __syncthreads();
@@ -96,17 +96,17 @@ __global__ void softmax_kl_loss_rfwd_kernel(
   uint32_t batch_idx = blockIdx.x;
   uint32_t idx = j + dim * batch_idx;
   if (j < dim && batch_idx < batch_sz) {
-    float r_yp_i = r_xs[idx] - r_mean[batch_idx];
-    r_grad[idx] = ys[idx] * r_yp_i;
-    cache[OFFSET_BANK(j)] = -targets[idx] * r_yp_i;
+    float r_yp_j = r_xs[idx] - r_mean[batch_idx];
+    r_grad[idx] = ys[idx] * r_yp_j;
+    cache[OFFSET_BANK(j)] = -targets[idx] * r_yp_j;
   } else {
     cache[OFFSET_BANK(j)] = 0.0f;
   }
   __syncthreads();
-  for (int s = 1; s < blockDim.x; s *= 2) {
+  for (uint32_t s = 1; s < blockDim.x; s *= 2) {
     if (j < dim && batch_idx < batch_sz) {
-      if (j % (2*s) == 0 && (j + s) < dim && cache[OFFSET_BANK(j)] < cache[OFFSET_BANK(j + s)]) {
-        cache[OFFSET_BANK(j)] = cache[OFFSET_BANK(j + s)];
+      if (j % (2*s) == 0 && (j + s) < dim) {
+        cache[OFFSET_BANK(j)] += cache[OFFSET_BANK(j + s)];
       }
     }
     __syncthreads();

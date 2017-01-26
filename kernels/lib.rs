@@ -29,6 +29,12 @@ extern "C" {
       in_r_val: *const f32,
       out_r_val: *mut f32,
       stream: cudaStream_t);
+  pub fn neuralops_cuda_activate_rect_rbwd(
+      in_val: *const f32,
+      dim: size_t,
+      out_r_grad: *const f32,
+      in_r_grad: *mut f32,
+      stream: cudaStream_t);
   pub fn neuralops_cuda_activate_leakrect_fwd(
       in_act: *const f32,
       dim: size_t,

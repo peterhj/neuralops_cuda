@@ -1056,16 +1056,16 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
   }
 
   fn _r_backward(&mut self) {
-    // FIXME(20170125)
-    unimplemented!();
     let batch_size = self.out.batch_sz.get();
 
-    let out_grad = self.out.grad.as_ref().unwrap().borrow();
-    self.act_kern._backward(batch_size, self.tmp_buf.as_ref(), out_grad.as_ref(), self.tmp_grad.as_mut(), self.stream.conn());
+    self.act_kern._r_backward(batch_size, self.tmp_buf.as_ref(), self.tmp.r_val.as_ref().as_ref(), self.out.data.r_grad.as_ref().as_ref(), self.tmp.r_grad.as_mut().as_mut(), self.stream.conn());
 
     let in_buf = self.in_.buf.borrow();
+
     in_buf.as_ref().wait(&self.stream.conn());
+    self.in_.data.r_val.as_ref().as_ref().wait(&self.stream.conn());
     self.tmp_grad.as_ref().wait(&self.stream.conn());
+    self.tmp.r_grad.as_ref().as_ref().wait(&self.stream.conn());
     self.weights.r_grad.as_mut().as_view().wait(&self.stream.conn());
     if self.cfg.bias {
       self.bias.r_grad.as_mut().as_view().wait(&self.stream.conn());
@@ -1075,18 +1075,18 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
     unsafe { self.bwd_w.backward_filter(
         1.0,
         in_buf.as_ref().as_ptr(),
-        self.tmp_grad.as_ref().as_ptr(),
+        self.tmp.r_grad.as_ref().as_ref().as_ptr(),
         1.0,
-        self.weights.grad.as_mut().as_view_mut().as_mut_ptr(),
+        self.weights.r_grad.as_mut().as_view_mut().as_mut_ptr(),
         self.scratch.as_mut().as_mut_ptr(),
         &*self.stream.conn().cudnn(),
     ).unwrap() };
     unsafe { self.bwd_w.backward_filter(
         1.0,
-        in_buf.as_ref().as_ptr(),
+        self.in_.data.r_val.as_ref().as_ref().as_ptr(),
         self.tmp_grad.as_ref().as_ptr(),
         1.0,
-        self.weights.grad.as_mut().as_view_mut().as_mut_ptr(),
+        self.weights.r_grad.as_mut().as_view_mut().as_mut_ptr(),
         self.scratch.as_mut().as_mut_ptr(),
         &*self.stream.conn().cudnn(),
     ).unwrap() };
@@ -1094,34 +1094,46 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
       unimplemented!();
     }
     in_buf.as_ref().post(&self.stream.conn());
+    self.in_.data.r_val.as_ref().as_ref().post(&self.stream.conn());
     self.tmp_grad.as_ref().post(&self.stream.conn());
+    self.tmp.r_grad.as_ref().as_ref().post(&self.stream.conn());
     self.weights.r_grad.as_mut().as_view().post(&self.stream.conn());
     if self.cfg.bias {
       self.bias.r_grad.as_mut().as_view().post(&self.stream.conn());
     }
     self.scratch.as_ref().post(&self.stream.conn());
 
-    if let Some(ref in_grad) = self.in_.grad.as_ref() {
-      let mut in_grad = in_grad.borrow_mut();
-      in_grad.as_ref().wait(&self.stream.conn());
-      self.tmp_grad.as_ref().wait(&self.stream.conn());
-      self.weights.val.as_ref().as_view().wait(&self.stream.conn());
-      self.scratch.as_ref().wait(&self.stream.conn());
-      self.bwd_d.set_batch_size(batch_size).unwrap();
-      unsafe { self.bwd_d.backward_data(
-          1.0,
-          self.weights.val.as_ref().as_view().as_ptr(),
-          self.tmp_grad.as_ref().as_ptr(),
-          0.0,
-          in_grad.as_mut().as_mut_ptr(),
-          self.scratch.as_mut().as_mut_ptr(),
-          &*self.stream.conn().cudnn(),
-      ).unwrap() };
-      in_grad.as_ref().post(&self.stream.conn());
-      self.tmp_grad.as_ref().post(&self.stream.conn());
-      self.weights.val.as_ref().as_view().post(&self.stream.conn());
-      self.scratch.as_ref().post(&self.stream.conn());
-    }
+    self.in_.data.r_grad.as_mut().as_ref().wait(&self.stream.conn());
+    self.tmp_grad.as_ref().wait(&self.stream.conn());
+    self.tmp.r_grad.as_ref().as_ref().wait(&self.stream.conn());
+    self.weights.val.as_ref().as_view().wait(&self.stream.conn());
+    self.weights.r_dir.as_ref().as_view().wait(&self.stream.conn());
+    self.scratch.as_ref().wait(&self.stream.conn());
+    self.bwd_d.set_batch_size(batch_size).unwrap();
+    unsafe { self.bwd_d.backward_data(
+        1.0,
+        self.weights.val.as_ref().as_view().as_ptr(),
+        self.tmp.r_grad.as_ref().as_ref().as_ptr(),
+        0.0,
+        self.in_.data.r_grad.as_mut().as_mut_ptr(),
+        self.scratch.as_mut().as_mut_ptr(),
+        &*self.stream.conn().cudnn(),
+    ).unwrap() };
+    unsafe { self.bwd_d.backward_data(
+        1.0,
+        self.weights.r_dir.as_ref().as_view().as_ptr(),
+        self.tmp_grad.as_ref().as_ptr(),
+        1.0,
+        self.in_.data.r_grad.as_mut().as_mut_ptr(),
+        self.scratch.as_mut().as_mut_ptr(),
+        &*self.stream.conn().cudnn(),
+    ).unwrap() };
+    self.in_.data.r_grad.as_mut().as_ref().post(&self.stream.conn());
+    self.tmp_grad.as_ref().post(&self.stream.conn());
+    self.tmp.r_grad.as_ref().as_ref().post(&self.stream.conn());
+    self.weights.val.as_ref().as_view().post(&self.stream.conn());
+    self.weights.r_dir.as_ref().as_view().post(&self.stream.conn());
+    self.scratch.as_ref().post(&self.stream.conn());
   }
 
   fn _dump_input(&mut self) -> Vec<u8> {

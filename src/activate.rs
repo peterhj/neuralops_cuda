@@ -143,4 +143,29 @@ impl DeviceActivateKernel {
       _ => unimplemented!(),
     }
   }
+
+  pub fn _r_backward<'a>(&self, batch_size: usize, in_val: DeviceMemRef<'a, f32>, in_r_val: DeviceMemRef<'a, f32>, out_r_grad: DeviceMemRef<'a, f32>, mut in_r_grad: DeviceMemRefMut<'a, f32>, conn: DeviceConn) {
+    match self.act_kind {
+      ActivationKind::Identity => {
+        in_r_grad.slice_mut(0, batch_size * self.out_dim)
+          .copy(out_r_grad.clone().slice(0, batch_size * self.out_dim), conn.clone());
+      }
+      ActivationKind::Rect => {
+        in_val.wait(&conn);
+        out_r_grad.wait(&conn);
+        in_r_grad.wait(&conn);
+        unsafe { neuralops_cuda_activate_rect_rbwd(
+            in_val.as_ptr(),
+            batch_size * self.out_dim,
+            out_r_grad.as_ptr(),
+            in_r_grad.as_mut_ptr(),
+            conn.raw_stream().ptr,
+        ) };
+        in_val.post(&conn);
+        out_r_grad.post(&conn);
+        in_r_grad.post(&conn);
+      }
+      _ => unimplemented!(),
+    }
+  }
 }

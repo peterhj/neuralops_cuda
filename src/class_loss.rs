@@ -1,6 +1,6 @@
 use prelude::*;
 use kernels::*;
-use softmax::{DeviceSoftmaxNLLKernel};
+use softmax::{DeviceSoftmaxKLKernel, DeviceSoftmaxNLLKernel};
 
 use densearray::prelude::*;
 use devicemem_cuda::prelude::*;
@@ -27,18 +27,18 @@ pub struct DeviceSoftmaxKLLoss<S, IoBuf: ?Sized> {
   stream:   DeviceStream,
   in_op:    Rc<RefCell<DiffOperator<S, IoBuf>>>,
   in_:      DeviceOutput,
+  prob:     DeviceMem<f32>,
   loss:     DeviceMem<f32>,
   r_loss:   DeviceMem<f32>,
-  prob:     DeviceMem<f32>,
-  acc_loss: f32,
-  target:   DeviceMem<u32>,
-  weight:   DeviceMem<f32>,
-  jac_targ: DeviceMem<f32>,
-  h_target: Vec<u32>,
-  h_weight: Vec<f32>,
-  h_loss:   Vec<f32>,
+  target:   DeviceMem<f32>,
+  //acc_loss: f32,
+  //weight:   DeviceMem<f32>,
+  //jac_targ: DeviceMem<f32>,
+  h_target: Vec<f32>,
+  //h_weight: Vec<f32>,
   h_prob:   Vec<f32>,
-  //softmax:  DeviceSoftmaxKLKernel,
+  h_loss:   Vec<f32>,
+  softmax:  DeviceSoftmaxKLKernel,
 }
 
 impl<S, IoBuf: ?Sized> DeviceSoftmaxKLLoss<S, IoBuf> {
@@ -145,27 +145,53 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxKLLoss<Samp
 
   fn _forward(&mut self, _phase: OpPhase) {
     let batch_size = self.in_.batch_sz.get();
-    unimplemented!();
+    let in_val = self.in_.buf.borrow();
+    self.softmax._forward(
+        batch_size,
+        in_val.as_ref(),
+        self.target.as_ref(),
+        self.prob.as_mut(),
+        self.loss.as_mut(),
+        self.stream.conn(),
+    );
   }
 
   fn _backward(&mut self) {
     let batch_size = self.in_.batch_sz.get();
-    unimplemented!();
+    if let Some(ref in_grad) = self.in_.grad.as_ref() {
+      let mut in_grad = in_grad.borrow_mut();
+      self.softmax._backward(
+          batch_size,
+          self.prob.as_ref(),
+          self.target.as_ref(),
+          in_grad.as_mut(),
+          self.stream.conn(),
+      );
+    }
   }
 
-  fn _backward2(&mut self) {
+  /*fn _backward2(&mut self) {
     let batch_size = self.in_.batch_sz.get();
     unimplemented!();
-  }
+  }*/
 
   fn _r_forward(&mut self) {
     let batch_size = self.in_.batch_sz.get();
-    unimplemented!();
+    let in_val = self.in_.buf.borrow();
+    self.softmax._r_forward(
+        batch_size,
+        in_val.as_ref(),
+        self.in_.data.r_val.as_ref().as_ref(),
+        self.prob.as_ref(),
+        self.target.as_ref(),
+        self.r_loss.as_mut(),
+        self.in_.data.r_grad.as_mut().as_mut(),
+        self.stream.conn(),
+    );
   }
 
   fn _r_backward(&mut self) {
-    let batch_size = self.in_.batch_sz.get();
-    unimplemented!();
+    // Do nothing. The R-forward pass also computes the input R-gradient.
   }
 }
 

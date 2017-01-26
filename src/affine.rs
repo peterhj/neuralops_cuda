@@ -364,6 +364,7 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceAffineOperator<S, IoBuf>
 
   fn _backward2(&mut self) {
     let batch_size = self.out.batch_sz.get();
+    unimplemented!();
 
     /*
     let out_grad2 = self.out.grad2(self.stream.conn());
@@ -436,7 +437,47 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceAffineOperator<S, IoBuf>
   }
 
   fn _r_backward(&mut self) {
-    unimplemented!();
+    let batch_size = self.out.batch_sz.get();
+
+    self.act_kern._r_backward(batch_size, self.tmp_buf.as_ref(), self.tmp.r_val.as_ref().as_ref(), self.out.data.r_grad.as_ref().as_ref(), self.tmp.r_grad.as_mut().as_mut(), self.stream.conn());
+
+    let in_buf = self.in_.buf.borrow();
+    self.weights.grad.as_mut().as_view_mut()
+      .matrix_prod(
+          1.0,
+          self.tmp_grad.as_ref().reshape((self.cfg.out_dim, batch_size)), Transpose::N,
+          self.in_.data.r_val.as_ref().as_ref().reshape((self.cfg.in_dim, batch_size)), Transpose::T,
+          1.0,
+          self.stream.conn(),
+      );
+    self.weights.grad.as_mut().as_view_mut()
+      .matrix_prod(
+          1.0,
+          self.tmp.r_grad.as_ref().as_ref().reshape((self.cfg.out_dim, batch_size)), Transpose::N,
+          in_buf.as_ref().reshape((self.cfg.in_dim, batch_size)), Transpose::T,
+          1.0,
+          self.stream.conn(),
+      );
+    if self.cfg.bias {
+      unimplemented!();
+    }
+
+    self.in_.data.r_grad.as_mut().as_mut().reshape_mut((self.cfg.in_dim, batch_size))
+      .matrix_prod(
+          1.0,
+          self.weights.val.as_ref().as_view(), Transpose::T,
+          self.tmp.r_grad.as_ref().as_ref().reshape((self.cfg.out_dim, batch_size)), Transpose::N,
+          0.0,
+          self.stream.conn(),
+      );
+    self.in_.data.r_grad.as_mut().as_mut().reshape_mut((self.cfg.in_dim, batch_size))
+      .matrix_prod(
+          1.0,
+          self.weights.r_dir.as_ref().as_view(), Transpose::T,
+          self.tmp_grad.as_ref().reshape((self.cfg.out_dim, batch_size)), Transpose::N,
+          1.0,
+          self.stream.conn(),
+      );
   }
 
   fn _dump_input(&mut self) -> Vec<u8> {
