@@ -469,10 +469,11 @@ pub fn build_imagenet_resnet18_loss<IoBuf: ?Sized + 'static>(batch_sz: usize, st
     num_classes:    1000,
   };
   let input = DeviceVarInputOperator::new(input_cfg, OpCapability::Backward, stream.clone());
-  //let conv1 = DeviceBatchNormConv2dOperator::new(conv1_cfg, OpCapability::Backward, input, 0, stream.clone());
-  //let pool1 = DevicePool2dOperator::new(pool1_cfg, OpCapability::Backward, conv1, 0, stream.clone());
-  let conv1 = DeviceBatchNormConv2dOperator::new(alt_conv1_cfg, OpCapability::Backward, input, 0, stream.clone());
-  let res1_1 = DeviceResidualConv2dOperator::new(res1_cfg, OpCapability::Backward, /*pool1*/ conv1, 0, stream.clone());
+  //let conv1 = DeviceBatchNormConv2dOperator::new(alt_conv1_cfg, OpCapability::Backward, input, 0, stream.clone());
+  //let res1_1 = DeviceResidualConv2dOperator::new(res1_cfg, OpCapability::Backward, /*pool1*/ conv1, 0, stream.clone());
+  let conv1 = DeviceBatchNormConv2dOperator::new(conv1_cfg, OpCapability::Backward, input, 0, stream.clone());
+  let pool1 = DevicePool2dOperator::new(pool1_cfg, OpCapability::Backward, conv1, 0, stream.clone());
+  let res1_1 = DeviceResidualConv2dOperator::new(res1_cfg, OpCapability::Backward, pool1, 0, stream.clone());
   let res1_2 = DeviceResidualConv2dOperator::new(res1_cfg, OpCapability::Backward, res1_1, 0, stream.clone());
   let res2_1 = DeviceProjResidualConv2dOperator::new(proj_res2_cfg, OpCapability::Backward, res1_2, 0, stream.clone());
   let res2_2 = DeviceResidualConv2dOperator::new(res2_cfg, OpCapability::Backward, res2_1, 0, stream.clone());

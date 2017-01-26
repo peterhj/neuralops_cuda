@@ -17,18 +17,258 @@ use std::cell::{RefCell};
 use std::rc::{Rc};
 
 pub struct DeviceLstSqLoss<S, IoBuf: ?Sized> {
+  cfg:      LstSqLossConfig,
   node:     OperatorNode,
   stream:   DeviceStream,
   in_op:    Rc<RefCell<DiffOperator<S, IoBuf>>>,
   in_:      DeviceOutput,
-  out:      DeviceOutput,
+  //out:      DeviceOutput,
   loss:     DeviceMem<f32>,
+  //loss_acc: DeviceMem<f32>, // XXX: scalar loss accumulator.
   r_loss:   DeviceMem<f32>,
   target:   DeviceMem<f32>,
-  weight:   DeviceMem<u32>,
+  weight:   DeviceMem<f32>,
   jac_targ: DeviceMem<f32>,
-  h_target: AsyncMem<f32>,
-  h_weight: AsyncMem<f32>,
+  //h_loss_acc:   Vec<f32>,
+  h_pred:   Vec<f32>,
+  h_loss:   Vec<f32>,
+  //h_target: AsyncMem<f32>,
+  //h_weight: AsyncMem<f32>,
+  h_target: Vec<f32>,
+  h_weight: Vec<f32>,
+}
+
+impl<S, IoBuf: ?Sized> DeviceLstSqLoss<S, IoBuf> {
+  pub fn new<InOp>(cfg: LstSqLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceLstSqLoss<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
+    let in_ = prev_op.borrow()._output(prev_arm);
+    let mut h_pred = Vec::with_capacity(cfg.batch_sz);
+    h_pred.resize(cfg.batch_sz, 0.0);
+    let mut h_loss = Vec::with_capacity(cfg.batch_sz);
+    h_loss.resize(cfg.batch_sz, 0.0);
+    let mut h_target = Vec::with_capacity(cfg.batch_sz);
+    h_target.resize(cfg.batch_sz, 0.0);
+    let mut h_weight = Vec::with_capacity(cfg.batch_sz);
+    h_weight.resize(cfg.batch_sz, 0.0);
+    Rc::new(RefCell::new(DeviceLstSqLoss{
+      cfg:      cfg,
+      node:     OperatorNode::default(),
+      stream:   stream.clone(),
+      in_op:    prev_op,
+      in_:      in_,
+      loss:     DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      r_loss:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      target:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      weight:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      jac_targ: DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      h_pred:   h_pred,
+      h_loss:   h_loss,
+      h_target: h_target,
+      h_weight: h_weight,
+    }))
+  }
+}
+
+impl<S, IoBuf: ?Sized> Operator for DeviceLstSqLoss<S, IoBuf> {
+  fn _next(&self) -> u64 {
+    self.node._next()
+  }
+}
+
+/*impl<S, IoBuf: ?Sized> DeviceOperator for DeviceLstSqLoss<S, IoBuf> /*where S: SampleLabel*/ {
+  fn _output(&self, arm: usize) -> DeviceOutput {
+    assert_eq!(0, arm);
+    self.out.clone()
+  }
+}*/
+
+impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceLstSqLoss<SampleItem, IoBuf> {
+  fn reset_loss(&mut self) {
+  }
+
+  fn store_loss(&mut self) {
+  }
+
+  fn get_loss(&mut self) -> f32 {
+    unimplemented!();
+  }
+
+  fn set_jacobian_target_with_r_loss(&mut self) {
+    let batch_sz = self.in_.batch_sz.get();
+    self.jac_targ.as_mut().reshape_mut(batch_sz).copy(self.r_loss.as_ref().reshape(batch_sz), self.stream.conn());
+  }
+
+  fn r_gauss_newton_transform(&mut self) {
+    // XXX: prefer to use Gauss-Newton versions of `backward` and `r_forward`,
+    // which are more numerically stable (i.e. do not introduce NaNs).
+    unimplemented!();
+  }
+
+  fn _store_pred(&mut self) {
+  }
+
+  fn _get_pred(&mut self) -> &[f32] {
+    &self.h_pred
+  }
+}
+
+impl<S, IoBuf: ?Sized> DiffOperatorData<S> for DeviceLstSqLoss<S, IoBuf> {
+  default fn _load_batch(&mut self, samples: &[S]) {
+    unimplemented!();
+  }
+}
+
+impl<IoBuf: ?Sized> DiffOperatorData<SampleItem> for DeviceLstSqLoss<SampleItem, IoBuf> {
+  fn _load_batch(&mut self, samples: &[SampleItem]) {
+    let actual_batch_size = samples.len();
+    assert!(actual_batch_size <= self.cfg.batch_sz);
+    for (idx, sample) in samples.iter().enumerate() {
+      if sample.kvs.contains::<SampleRegressTargetKey>() {
+        let target = *sample.kvs.get::<SampleRegressTargetKey>().unwrap();
+        self.h_target[idx] = target;
+      } else {
+        self.h_target[idx] = 0.0;
+      }
+      if sample.kvs.contains::<SampleWeightKey>() {
+        let weight = *sample.kvs.get::<SampleWeightKey>().unwrap();
+        self.h_weight[idx] = weight;
+      } else {
+        self.h_weight[idx] = 1.0;
+      }
+    }
+    self.target.as_mut().load_sync(&self.h_target, self.stream.conn());
+    self.weight.as_mut().load_sync(&self.h_weight, self.stream.conn());
+  }
+}
+
+impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceLstSqLoss<S, IoBuf> {
+}
+
+impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceLstSqLoss<SampleItem, IoBuf> {
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
+    self.node.push(epoch);
+    assert!(self.node.limit(1));
+    self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
+    apply(self);
+    self.node.pop(epoch);
+  }
+
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
+    self.node.push(epoch);
+    assert!(self.node.limit(1));
+    apply(self);
+    self.in_op.borrow_mut()._traverse_bwd(epoch, apply);
+    self.node.pop(epoch);
+  }
+
+  fn _forward(&mut self, _phase: OpPhase) {
+    let batch_size = self.in_.batch_sz.get();
+    let in_buf = self.in_.buf.borrow();
+
+    in_buf.as_ref().wait(&self.stream.conn());
+    self.target.as_ref().wait(&self.stream.conn());
+    self.weight.as_ref().wait(&self.stream.conn());
+    self.loss.as_ref().wait(&self.stream.conn());
+    unsafe { neuralops_cuda_lst_sq_fwd(
+        in_buf.as_ref().as_ptr(),
+        batch_size,
+        self.target.as_ref().as_ptr(),
+        self.weight.as_ref().as_ptr(),
+        self.loss.as_mut().as_mut_ptr(),
+        self.stream.conn().raw_stream().ptr,
+    ) };
+    in_buf.as_ref().post(&self.stream.conn());
+    self.target.as_ref().post(&self.stream.conn());
+    self.weight.as_ref().post(&self.stream.conn());
+    self.loss.as_ref().post(&self.stream.conn());
+
+    in_buf.as_ref().store_sync(&mut self.h_pred, self.stream.conn());
+    self.loss.as_ref().store_sync(&mut self.h_loss, self.stream.conn());
+  }
+
+  fn _backward(&mut self) {
+    if let Some(ref in_grad) = self.in_.grad.as_ref() {
+      let batch_size = self.in_.batch_sz.get();
+      let in_buf = self.in_.buf.borrow();
+      let mut in_grad = in_grad.borrow_mut();
+
+      // FIXME FIXME FIXME(20160125): this needs the jacobian target
+      // to be correct!
+      in_buf.as_ref().wait(&self.stream.conn());
+      self.target.as_ref().wait(&self.stream.conn());
+      self.weight.as_ref().wait(&self.stream.conn());
+      in_grad.as_ref().wait(&self.stream.conn());
+      unsafe { neuralops_cuda_lst_sq_bwd(
+          in_buf.as_ref().as_ptr(),
+          batch_size,
+          self.target.as_ref().as_ptr(),
+          self.weight.as_ref().as_ptr(),
+          //self.jac_targ.as_ref().as_ptr(),
+          in_grad.as_mut().as_mut_ptr(),
+          self.stream.conn().raw_stream().ptr,
+      ) };
+      if let Some(grad_clip) = self.cfg.grad_clip {
+        assert!(grad_clip > 0.0);
+        unsafe { neuralops_cuda_clamp(
+            in_grad.as_mut().as_mut_ptr(),
+            batch_size,
+            -grad_clip,
+            grad_clip,
+            self.stream.conn().raw_stream().ptr,
+        ) };
+      }
+      in_buf.as_ref().post(&self.stream.conn());
+      self.target.as_ref().post(&self.stream.conn());
+      self.weight.as_ref().post(&self.stream.conn());
+      in_grad.as_ref().post(&self.stream.conn());
+    }
+  }
+
+  fn _backward_gauss_newton(&mut self) {
+    if let Some(ref in_grad) = self.in_.grad.as_ref() {
+      let batch_size = self.in_.batch_sz.get();
+      let mut in_grad = in_grad.borrow_mut();
+      in_grad.as_mut().copy(self.jac_targ.as_ref(), self.stream.conn());
+      in_grad.as_mut().reshape_mut(batch_size).elem_mult(self.weight.as_ref().reshape(batch_size), self.stream.conn());
+    }
+  }
+
+  fn _backward2(&mut self) {
+    unimplemented!();
+  }
+
+  fn _r_forward(&mut self) {
+    let batch_size = self.in_.batch_sz.get();
+    let in_buf = self.in_.buf.borrow();
+
+    // FIXME: this should not touch the jacobian target.
+    in_buf.as_ref().wait(&self.stream.conn());
+    self.in_.data.r_val.as_ref().as_ref().wait(&self.stream.conn());
+    self.target.as_ref().wait(&self.stream.conn());
+    self.jac_targ.as_ref().wait(&self.stream.conn());
+    self.r_loss.as_ref().wait(&self.stream.conn());
+    unsafe { neuralops_cuda_lst_sq_rfwd(
+        in_buf.as_ref().as_ptr(),
+        batch_size,
+        self.in_.data.r_val.as_ref().as_ref().as_ptr(),
+        self.target.as_ref().as_ptr(),
+        self.jac_targ.as_ref().as_ptr(),
+        self.r_loss.as_mut().as_mut_ptr(),
+        self.stream.conn().raw_stream().ptr,
+    ) };
+    in_buf.as_ref().post(&self.stream.conn());
+    self.target.as_ref().post(&self.stream.conn());
+    self.jac_targ.as_ref().post(&self.stream.conn());
+    self.r_loss.as_ref().post(&self.stream.conn());
+  }
+
+  fn _r_forward_gauss_newton(&mut self) {
+    let batch_size = self.in_.batch_sz.get();
+    self.r_loss.as_mut().copy(self.in_.data.r_val.as_ref().as_ref(), self.stream.conn());
+  }
+
+  fn _r_backward(&mut self) {
+    unimplemented!();
+  }
 }
 
 pub struct DeviceIndLstSqRegressLoss<S, IoBuf: ?Sized> {
@@ -137,13 +377,19 @@ impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceIndLstSqRegressLoss<Sa
     //self.accuracy = 0;
   }
 
-  fn store_loss(&mut self) -> f32 {
+  fn store_loss(&mut self) {
+  }
+
+  fn get_loss(&mut self) -> f32 {
     self.acc_loss + self.reg_loss
   }
 
   /*fn _store_accuracy(&mut self) -> usize {
     self.accuracy
   }*/
+
+  fn _store_pred(&mut self) {
+  }
 
   fn _get_pred(&mut self) -> &[f32] {
     &self.preds_h

@@ -1,4 +1,5 @@
 use prelude::*;
+use data::{DeviceSampleCache};
 use kernels::*;
 
 use densearray::prelude::*;
@@ -9,6 +10,7 @@ use rng::{RngState};
 use rng::xorshift::{Xorshiftplus128Rng};
 
 use rand::{Rng, thread_rng};
+use std::any::{Any};
 use std::cell::{RefCell};
 use std::marker::{PhantomData};
 use std::mem::{size_of};
@@ -25,6 +27,7 @@ pub struct DeviceVarInputOperator<S> {
   tmp_dims: Vec<(usize, usize, usize)>,
   h_buf:    Vec<u8>,
   tmp_buf:  DeviceMem<f32>,
+  reload:   bool,
   _marker:  PhantomData<S>,
 }
 
@@ -52,6 +55,7 @@ impl<S> DeviceVarInputOperator<S> {
       tmp_dims: Vec::with_capacity(batch_sz),
       h_buf:    h_buf,
       tmp_buf:  tmp_buf,
+      reload:   false,
       _marker:  PhantomData,
     }))
   }
@@ -82,63 +86,97 @@ impl DiffOperatorData<SampleItem> for DeviceVarInputOperator<SampleItem> {
     assert!(batch_size <= self.cfg.batch_sz);
     self.out.batch_sz.set(batch_size);
 
-    match self.cfg.in_dtype {
-      Dtype::F32 => {
-        self.h_buf.alias_bytes_mut().reshape_mut(batch_size * self.cfg.max_stride).set_constant(0.0_f32);
-      }
-      Dtype::U8 => {
-        self.h_buf.reshape_mut(batch_size * self.cfg.max_stride).set_constant(0);
-      }
-      _ => unimplemented!(),
-    }
-    self.in_dims.clear();
-    for (idx, sample) in samples.iter().enumerate() {
+    if !self.reload {
       match self.cfg.in_dtype {
         Dtype::F32 => {
-          let mut h_buf: &mut [f32] = &mut self.h_buf.alias_bytes_mut()[idx * self.cfg.max_stride .. (idx+1) * self.cfg.max_stride];
-          if let Some(data) = sample.kvs.get::<SampleSharedExtractInputKey<[f32]>>() {
-            data.extract_input(h_buf).unwrap();
-          } else if let Some(data) = sample.kvs.get::<SampleExtractInputKey<[f32]>>() {
-            data.extract_input(h_buf).unwrap();
-          } else {
-            panic!("SampleItem is missing [f32] data");
-          }
+          self.h_buf.alias_bytes_mut().reshape_mut(batch_size * self.cfg.max_stride).set_constant(0.0_f32);
         }
         Dtype::U8 => {
-          let mut h_buf: &mut [u8] = &mut self.h_buf[idx * self.cfg.max_stride .. (idx+1) * self.cfg.max_stride];
-          if let Some(data) = sample.kvs.get::<SampleSharedExtractInputKey<[u8]>>() {
-            data.extract_input(h_buf).unwrap();
-          } else if let Some(data) = sample.kvs.get::<SampleExtractInputKey<[u8]>>() {
-            data.extract_input(h_buf).unwrap();
-          } else {
-            panic!("SampleItem is missing [u8] data");
-          }
+          self.h_buf.reshape_mut(batch_size * self.cfg.max_stride).set_constant(0);
         }
         _ => unimplemented!(),
       }
-      if let Some(data) = sample.kvs.get::<SampleInputShapeKey<(usize, usize, usize)>>() {
-        let in_dim = data.input_shape().unwrap();
-        self.in_dims.push(in_dim);
-      } else {
-        panic!("SampleItem is missing input dimensions");
+      self.in_dims.clear();
+      for (idx, sample) in samples.iter().enumerate() {
+        match self.cfg.in_dtype {
+          Dtype::F32 => {
+            let mut h_buf: &mut [f32] = &mut self.h_buf.alias_bytes_mut()[idx * self.cfg.max_stride .. (idx+1) * self.cfg.max_stride];
+            if let Some(data) = sample.kvs.get::<SampleSharedExtractInputKey<[f32]>>() {
+              data.extract_input(h_buf).unwrap();
+            } else if let Some(data) = sample.kvs.get::<SampleExtractInputKey<[f32]>>() {
+              data.extract_input(h_buf).unwrap();
+            } else {
+              panic!("SampleItem is missing [f32] data");
+            }
+          }
+          Dtype::U8 => {
+            let mut h_buf: &mut [u8] = &mut self.h_buf[idx * self.cfg.max_stride .. (idx+1) * self.cfg.max_stride];
+            if let Some(data) = sample.kvs.get::<SampleSharedExtractInputKey<[u8]>>() {
+              data.extract_input(h_buf).unwrap();
+            } else if let Some(data) = sample.kvs.get::<SampleExtractInputKey<[u8]>>() {
+              data.extract_input(h_buf).unwrap();
+            } else {
+              panic!("SampleItem is missing [u8] data");
+            }
+          }
+          _ => unimplemented!(),
+        }
+        if let Some(data) = sample.kvs.get::<SampleInputShapeKey<(usize, usize, usize)>>() {
+          let in_dim = data.input_shape().unwrap();
+          self.in_dims.push(in_dim);
+        } else {
+          panic!("SampleItem is missing input dimensions");
+        }
+      }
+      // FIXME(20161014): could also do asynchronous loads in the previous loop.
+      match self.cfg.in_dtype {
+        Dtype::F32 => {
+          self.out.buf.borrow_mut().as_mut()
+            .slice_mut(0, batch_size * self.cfg.max_stride)
+            .load_sync(&self.h_buf.alias_bytes()[ .. batch_size * self.cfg.max_stride], self.stream.conn());
+        }
+        Dtype::U8 => {
+          self.tmp_buf.as_mut()
+            .alias_bytes_mut()
+            .slice_mut(0, batch_size * self.cfg.max_stride)
+            .load_sync(&self.h_buf[ .. batch_size * self.cfg.max_stride], self.stream.conn());
+          self.out.buf.borrow_mut().as_mut().slice_mut(0, batch_size * self.cfg.max_stride)
+            .cast_from(self.tmp_buf.as_ref().alias_bytes().slice(0, batch_size * self.cfg.max_stride), self.stream.conn());
+        }
+        _ => unimplemented!(),
       }
     }
-    // FIXME(20161014): could also do asynchronous loads in the previous loop.
-    match self.cfg.in_dtype {
-      Dtype::F32 => {
-        self.out.buf.borrow_mut().as_mut()
-          .slice_mut(0, batch_size * self.cfg.max_stride)
-          .load_sync(&self.h_buf.alias_bytes()[ .. batch_size * self.cfg.max_stride], self.stream.conn());
+    self.reload = false;
+  }
+
+  fn _cache_batch(&mut self, keys: &[u64], cache: &mut Any) {
+    match cache.downcast_mut::<DeviceSampleCache>() {
+      Some(cache) => {
+        for (idx, &key) in keys.iter().enumerate() {
+          let out_val = self.out.buf.borrow();
+          let src = out_val.as_ref()
+            .slice(idx * self.cfg.max_stride, (idx+1) * self.cfg.max_stride);
+          cache.put(key, self.in_dims[idx], src, self.stream.conn());
+        }
       }
-      Dtype::U8 => {
-        self.tmp_buf.as_mut()
-          .alias_bytes_mut()
-          .slice_mut(0, batch_size * self.cfg.max_stride)
-          .load_sync(&self.h_buf[ .. batch_size * self.cfg.max_stride], self.stream.conn());
-        self.out.buf.borrow_mut().as_mut().slice_mut(0, batch_size * self.cfg.max_stride)
-          .cast_from(self.tmp_buf.as_ref().alias_bytes().slice(0, batch_size * self.cfg.max_stride), self.stream.conn());
+      None => unimplemented!(),
+    }
+  }
+
+  fn _reload_cached_batch(&mut self, keys: &[u64], cache: &mut Any) {
+    match cache.downcast_mut::<DeviceSampleCache>() {
+      Some(cache) => {
+        self.in_dims.clear();
+        for (idx, &key) in keys.iter().enumerate() {
+          let mut out_val = self.out.buf.borrow_mut();
+          let mut dst = out_val.as_mut()
+            .slice_mut(idx * self.cfg.max_stride, (idx+1) * self.cfg.max_stride);
+          let in_dim = cache.get(key, dst, self.stream.conn());
+          self.in_dims.push(in_dim);
+        }
+        self.reload = true;
       }
-      _ => unimplemented!(),
+      None => unimplemented!(),
     }
   }
 }
@@ -209,6 +247,32 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceVarInputOperator<S
                 .slice_mut(a * space_len + idx * self.cfg.max_stride, (idx+1) * self.cfg.max_stride)
                 .reshape_mut(space_len)
                 .add_scalar(-shift[a], self.stream.conn());
+            }
+          }
+        }
+        &VarInputPreproc::Interpolate2d{w, h, ref phases} => {
+          if phases.contains(&phase) {
+            //let mut out_buf = self.out.buf.borrow_mut();
+            for idx in 0 .. batch_size {
+              let in_dim = self.tmp_dims[idx];
+              let (out_w, out_h) = (w, h);
+              let out_dim = (out_w, out_h, in_dim.2);
+              let out_len = out_dim.flat_len();
+              {
+                let out = out_buf.as_ref().slice(idx * self.cfg.max_stride, (idx+1) * self.cfg.max_stride);
+                let tmp = self.tmp_buf.as_mut().slice_mut(idx * out_len, (idx+1) * out_len);
+                unsafe { neuralops_cuda_interpolate2d_catmullrom(
+                    out.as_ptr(),
+                    in_dim.0, in_dim.1, in_dim.2,
+                    tmp.as_mut_ptr(),
+                    out_dim.0, out_dim.1,
+                    self.stream.conn().raw_stream().ptr,
+                ) };
+              }
+              let tmp = self.tmp_buf.as_ref().slice(idx * out_len, (idx+1) * out_len);
+              let mut out = out_buf.as_mut().slice_mut(idx * self.cfg.max_stride, idx * self.cfg.max_stride + out_len);
+              out.copy(tmp, self.stream.conn());
+              self.tmp_dims[idx] = out_dim;
             }
           }
         }

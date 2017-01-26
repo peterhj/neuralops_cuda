@@ -157,7 +157,7 @@ impl<S, IoBuf: ?Sized> DevicePool2dOperator<S, IoBuf> {
     let in_ = prev_op.borrow()._output(prev_arm);
     let (in_w, in_h, chan) = cfg.in_dim;
     let (out_w, out_h, _) = cfg.out_dim();
-    println!("DEBUG: pool2d: {:?} {:?}", cfg.in_dim, cfg.out_dim());
+    //println!("DEBUG: pool2d: {:?} {:?}", cfg.in_dim, cfg.out_dim());
     let mut h_in = Vec::with_capacity(cfg.batch_sz * cfg.in_dim.flat_len());
     h_in.resize(cfg.batch_sz * cfg.in_dim.flat_len(), 0.0);
     let mut h_out = Vec::with_capacity(cfg.batch_sz * cfg.out_dim().flat_len());

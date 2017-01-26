@@ -10,60 +10,51 @@ use std::collections::{HashMap};
 use std::hash::{Hash};
 use std::rc::{Rc};
 
-pub struct DeviceCachedSampleItem<K> {
-  cache:    Rc<DeviceSampleCache<K>>,
-  idx:      usize,
-  label:    bool,
-  target:   bool,
-  weight:   bool,
-}
-
-impl<K> DeviceCachedSampleItem<K> {
-  pub fn has_class_label(&self) -> bool {
-    self.label
-  }
-
-  pub fn has_regress_target(&self) -> bool {
-    self.target
-  }
-
-  pub fn has_weight(&self) -> bool {
-    self.weight
-  }
-}
-
-impl<K> SampleInputShape<(usize, usize, usize)> for DeviceCachedSampleItem<K> {
-  fn input_shape(&self) -> Option<(usize, usize, usize)> {
-    let inner = self.cache.inner.borrow();
-    Some(inner.input_shape[self.idx])
-  }
-}
-
-pub trait DeviceSampleExtractInput<U: ?Sized> {
-  fn device_extract_input(&self, output: &mut DeviceMem<f32>);
-}
-
-pub trait DeviceSampleExtractLabel<U: ?Sized> {
-  fn device_extract_label(&self, output: &mut DeviceMem<u32>);
-}
-
-pub trait DeviceSampleExtractTarget<U: ?Sized> {
-  fn device_extract_target(&self, output: &mut DeviceMem<f32>);
-}
-
-pub trait DeviceSampleExtractWeight<U: ?Sized> {
-  fn device_extract_weight(&self, output: &mut DeviceMem<f32>);
-}
-
 #[derive(Clone)]
 pub struct SampleCacheConfig {
-  pub batch_sz:     usize,
+  //pub batch_sz:     usize,
   pub capacity:     usize,
   pub input_stride: usize,
   pub input_dtype:  Dtype,
 }
 
-pub struct DeviceSampleCache<K> {
+pub struct DeviceSampleCache {
+  cfg:          SampleCacheConfig,
+  count:        usize,
+  input_shape:  Vec<(usize, usize, usize)>,
+  input_buf:    DeviceMem<f32>,
+}
+
+impl DeviceSampleCache {
+  pub fn new(cfg: SampleCacheConfig, conn: DeviceConn) -> DeviceSampleCache {
+    // FIXME
+    DeviceSampleCache{
+      cfg:          cfg,
+      count:        0,
+      input_shape:  vec![],
+      input_buf:    DeviceMem::zeros(1024, conn),
+    }
+  }
+
+  pub fn put<'a>(&'a mut self, key: u64, dim: (usize, usize, usize), src: DeviceMemRef<'a, f32>, conn: DeviceConn) {
+    let pos = key as usize;
+    self.input_buf.as_mut()
+      .slice_mut(pos * self.cfg.input_stride, (pos+1) * self.cfg.input_stride)
+      .copy(src, conn);
+    self.input_shape[pos] = dim;
+  }
+
+  pub fn get<'a>(&'a mut self, key: u64, mut dst: DeviceMemRefMut<'a, f32>, conn: DeviceConn) -> (usize, usize, usize) {
+    let pos = key as usize;
+    dst.copy(
+        self.input_buf.as_ref()
+          .slice(pos * self.cfg.input_stride, (pos+1) * self.cfg.input_stride),
+        conn);
+    self.input_shape[pos]
+  }
+}
+
+/*pub struct DeviceSampleCache<K> {
   cfg:      SampleCacheConfig,
   inner:    RefCell<DeviceSampleCacheInner<K>>,
 }
@@ -162,4 +153,49 @@ impl<K> DeviceSampleCache<K> where K: Clone + Eq + Hash {
   pub fn query(&self, key: K) -> DeviceCachedSampleItem<K> {
     unimplemented!();
   }
+}*/
+
+/*pub struct DeviceCachedSampleItem<K> {
+  cache:    Rc<DeviceSampleCache<K>>,
+  idx:      usize,
+  label:    bool,
+  target:   bool,
+  weight:   bool,
 }
+
+impl<K> DeviceCachedSampleItem<K> {
+  pub fn has_class_label(&self) -> bool {
+    self.label
+  }
+
+  pub fn has_regress_target(&self) -> bool {
+    self.target
+  }
+
+  pub fn has_weight(&self) -> bool {
+    self.weight
+  }
+}
+
+impl<K> SampleInputShape<(usize, usize, usize)> for DeviceCachedSampleItem<K> {
+  fn input_shape(&self) -> Option<(usize, usize, usize)> {
+    let inner = self.cache.inner.borrow();
+    Some(inner.input_shape[self.idx])
+  }
+}
+
+pub trait DeviceSampleExtractInput<U: ?Sized> {
+  fn device_extract_input(&self, output: &mut DeviceMem<f32>);
+}
+
+pub trait DeviceSampleExtractLabel<U: ?Sized> {
+  fn device_extract_label(&self, output: &mut DeviceMem<u32>);
+}
+
+pub trait DeviceSampleExtractTarget<U: ?Sized> {
+  fn device_extract_target(&self, output: &mut DeviceMem<f32>);
+}
+
+pub trait DeviceSampleExtractWeight<U: ?Sized> {
+  fn device_extract_weight(&self, output: &mut DeviceMem<f32>);
+}*/

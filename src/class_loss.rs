@@ -16,6 +16,161 @@ use std::cell::{RefCell};
 //use std::marker::{PhantomData};
 use std::rc::{Rc};
 
+pub struct CategoricalKLLossConfig {
+  pub batch_sz: usize,
+  pub num_cats: usize,
+}
+
+pub struct DeviceSoftmaxKLLoss<S, IoBuf: ?Sized> {
+  cfg:      CategoricalKLLossConfig,
+  node:     OperatorNode,
+  stream:   DeviceStream,
+  in_op:    Rc<RefCell<DiffOperator<S, IoBuf>>>,
+  in_:      DeviceOutput,
+  loss:     DeviceMem<f32>,
+  r_loss:   DeviceMem<f32>,
+  prob:     DeviceMem<f32>,
+  acc_loss: f32,
+  target:   DeviceMem<u32>,
+  weight:   DeviceMem<f32>,
+  jac_targ: DeviceMem<f32>,
+  h_target: Vec<u32>,
+  h_weight: Vec<f32>,
+  h_loss:   Vec<f32>,
+  h_prob:   Vec<f32>,
+  //softmax:  DeviceSoftmaxKLKernel,
+}
+
+impl<S, IoBuf: ?Sized> DeviceSoftmaxKLLoss<S, IoBuf> {
+  pub fn new<InOp>(cfg: CategoricalKLLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxKLLoss<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
+    unimplemented!();
+  }
+}
+
+impl<S, IoBuf: ?Sized> Operator for DeviceSoftmaxKLLoss<S, IoBuf> {
+  fn _next(&self) -> u64 {
+    self.node._next()
+  }
+}
+
+/*impl<S, IoBuf: ?Sized> DeviceOperator for DeviceSoftmaxKLLoss<S, IoBuf> {
+  fn _output(&self, arm: usize) -> DeviceOutput {
+    assert_eq!(0, arm);
+    self.out.clone()
+  }
+}*/
+
+impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceSoftmaxKLLoss<SampleItem, IoBuf> {
+  fn reset_loss(&mut self) {
+    // FIXME(20170125)
+  }
+
+  fn store_loss(&mut self) {
+  }
+
+  fn get_loss(&mut self) -> f32 {
+    unimplemented!();
+  }
+
+  fn set_jacobian_target_with_r_loss(&mut self) {
+    unimplemented!();
+  }
+
+  fn _store_accuracy(&mut self) {
+  }
+
+  fn _get_accuracy(&mut self) -> usize {
+    unimplemented!();
+  }
+
+  fn _store_pred(&mut self) {
+  }
+
+  fn _get_pred(&mut self) -> &[f32] {
+    &self.h_prob
+  }
+}
+
+impl<S, IoBuf: ?Sized> DiffOperatorData<S> for DeviceSoftmaxKLLoss<S, IoBuf> {
+  default fn _load_batch(&mut self, samples: &[S]) {
+    unimplemented!();
+  }
+}
+
+impl<IoBuf: ?Sized> DiffOperatorData<SampleItem> for DeviceSoftmaxKLLoss<SampleItem, IoBuf> {
+  fn _load_batch(&mut self, samples: &[SampleItem]) {
+    // FIXME(20170125)
+    let actual_batch_size = samples.len();
+    assert!(actual_batch_size <= self.cfg.batch_sz);
+    for (idx, sample) in samples.iter().enumerate() {
+      /*if sample.kvs.contains::<SampleClassLabelKey>() {
+        let cat = *sample.kvs.get::<SampleClassLabelKey>().unwrap();
+        assert!(cat < self.cfg.num_classes as u32);
+        assert!(cat != u32::MAX);
+        self.labels_h[idx] = cat;
+      } else {
+        self.labels_h[idx] = u32::MAX;
+      }
+      if sample.kvs.contains::<SampleWeightKey>() {
+        let weight = *sample.kvs.get::<SampleWeightKey>().unwrap();
+        self.ws_h[idx] = weight;
+      } else {
+        self.ws_h[idx] = 1.0;
+      }*/
+    }
+    /*self.labels.as_mut().load_sync(&self.labels_h, self.stream.conn());
+    self.weights.as_mut().load_sync(&self.ws_h, self.stream.conn());*/
+  }
+}
+
+impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceSoftmaxKLLoss<S, IoBuf> {
+}
+
+impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxKLLoss<SampleItem, IoBuf> {
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
+    self.node.push(epoch);
+    assert!(self.node.limit(1));
+    self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
+    apply(self);
+    self.node.pop(epoch);
+  }
+
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
+    self.node.push(epoch);
+    assert!(self.node.limit(1));
+    apply(self);
+    self.in_op.borrow_mut()._traverse_bwd(epoch, apply);
+    self.node.pop(epoch);
+  }
+
+  fn _forward(&mut self, _phase: OpPhase) {
+    let batch_size = self.in_.batch_sz.get();
+    unimplemented!();
+  }
+
+  fn _backward(&mut self) {
+    let batch_size = self.in_.batch_sz.get();
+    unimplemented!();
+  }
+
+  fn _backward2(&mut self) {
+    let batch_size = self.in_.batch_sz.get();
+    unimplemented!();
+  }
+
+  fn _r_forward(&mut self) {
+    let batch_size = self.in_.batch_sz.get();
+    unimplemented!();
+  }
+
+  fn _r_backward(&mut self) {
+    let batch_size = self.in_.batch_sz.get();
+    unimplemented!();
+  }
+}
+
+pub type DeviceSoftmaxNLLLoss<S, IoBuf: ?Sized> = DeviceSoftmaxNLLClassLoss<S, IoBuf>;
+
 pub struct DeviceSoftmaxNLLClassLoss<S, IoBuf: ?Sized> /*where S: SampleLabel*/ {
   cfg:      ClassLossConfig,
   node:     OperatorNode,
@@ -120,7 +275,18 @@ impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLoss<Sa
     self.accuracy = 0;
   }
 
-  fn store_loss(&mut self) -> f32 {
+  fn store_loss(&mut self) {
+    /*let batch_size = self.in_.batch_sz.get();
+    let mut out_buf = self.out.buf.borrow_mut();
+    out_buf.as_ref().store_sync(&mut self.losses_h, self.stream.conn());
+    let mut batch_loss = 0.0;
+    for idx in 0 .. batch_size {
+      batch_loss += self.losses_h[idx];
+    }
+    self.acc_loss += batch_loss;*/
+  }
+
+  fn get_loss(&mut self) -> f32 {
     self.acc_loss + self.reg_loss
   }
 
@@ -133,8 +299,26 @@ impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLoss<Sa
     // For NLL losses, the Gauss-Newton transform is an identity.
   }
 
-  fn _store_accuracy(&mut self) -> usize {
+  fn _store_accuracy(&mut self) {
+    /*let batch_size = self.in_.batch_sz.get();
+    let mut out_buf = self.out.buf.borrow_mut();
+    self.hats.as_ref().store_sync(&mut self.hats_h, self.stream.conn());
+    let mut batch_accuracy = 0;
+    for idx in 0 .. batch_size {
+      if self.hats_h[idx] == self.labels_h[idx] {
+        batch_accuracy += 1;
+      }
+    }
+    self.accuracy += batch_accuracy;*/
+  }
+
+  fn _get_accuracy(&mut self) -> usize {
     self.accuracy
+  }
+
+  fn _store_pred(&mut self) {
+    // FIXME(20170118): should not store to host synchronously each batch!
+    //self.probs.as_ref().store_sync(&mut self.probs_h, self.stream.conn());
   }
 
   fn _get_pred(&mut self) -> &[f32] {
@@ -244,9 +428,9 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLos
     );
 
     // FIXME(20170118): should not store to host synchronously each batch!
+    self.probs.as_ref().store_sync(&mut self.probs_h, self.stream.conn());
     out_buf.as_ref().store_sync(&mut self.losses_h, self.stream.conn());
     self.hats.as_ref().store_sync(&mut self.hats_h, self.stream.conn());
-    self.probs.as_ref().store_sync(&mut self.probs_h, self.stream.conn());
     let mut batch_loss = 0.0;
     let mut batch_accuracy = 0;
     for idx in 0 .. batch_size {
@@ -255,9 +439,10 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxNLLClassLos
         batch_accuracy += 1;
       }
     }
-    self.nsamples += batch_size;
     self.acc_loss += batch_loss;
     self.accuracy += batch_accuracy;
+
+    self.nsamples += batch_size;
   }
 
   fn _backward(&mut self) {
@@ -400,12 +585,21 @@ impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceLogisticNLLClassLoss<S
     self.accuracy = 0;
   }
 
-  fn store_loss(&mut self) -> f32 {
+  fn store_loss(&mut self) {
+  }
+
+  fn get_loss(&mut self) -> f32 {
     self.acc_loss + self.reg_loss
   }
 
-  fn _store_accuracy(&mut self) -> usize {
+  fn _store_accuracy(&mut self) {
+  }
+
+  fn _get_accuracy(&mut self) -> usize {
     self.accuracy
+  }
+
+  fn _store_pred(&mut self) {
   }
 
   fn _get_pred(&mut self) -> &[f32] {

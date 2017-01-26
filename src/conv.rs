@@ -581,7 +581,7 @@ pub struct DeviceConv2dOperator<S, IoBuf: ?Sized> {
 
 impl<S, IoBuf: ?Sized> DeviceConv2dOperator<S, IoBuf> {
   pub fn new<InOp>(cfg: Conv2dOperatorConfig, /*backend: Option<CudnnConv2dBackend>,*/ cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceConv2dOperator<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
-    println!("DEBUG: conv2d: {:?}", cfg);
+    //println!("DEBUG: conv2d: {:?}", cfg);
     let (in_w, in_h, in_chan) = cfg.in_dim;
     let (out_w, out_h, out_chan) = cfg.out_dim();
     /*let mut check_out_w: i32 = 0;
@@ -639,7 +639,7 @@ impl<S, IoBuf: ?Sized> DeviceConv2dOperator<S, IoBuf> {
         &*stream.conn().cudnn(),
     ).unwrap();
     workspace_size = max(workspace_size, bwd_d.work_size);
-    println!("DEBUG: conv2d: workspace size in bytes: {}", workspace_size);
+    //println!("DEBUG: conv2d: workspace size in bytes: {}", workspace_size);
     let add_bias = CudnnAddOp::new(
         CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, 1, 1, out_chan, 1).unwrap(),
         CudnnTensorDesc::<f32>::create_4d(CudnnTensorLayout::NCHW, out_w, out_h, out_chan, cfg.batch_sz).unwrap(),
@@ -721,8 +721,10 @@ impl<S> DiffOperatorIo<[f32]> for DeviceConv2dOperator<S, [f32]> {
     self.bias.as_view_mut().load_sync(self.hbias.as_view(), self.stream.conn());*/
     self.weights.val.as_mut().as_view_mut().load_sync(param_reader[offset .. ].reshape((self.cfg.kernel_w, self.cfg.kernel_h, self.cfg.in_dim.2, self.cfg.out_chan)), self.stream.conn());
     offset += self.cfg.kernel_w * self.cfg.kernel_h * self.cfg.in_dim.2 * self.cfg.out_chan;
-    self.bias.val.as_mut().as_view_mut().load_sync(param_reader[offset .. ].reshape(self.cfg.out_chan), self.stream.conn());
-    offset += self.cfg.out_chan;
+    if self.cfg.bias {
+      self.bias.val.as_mut().as_view_mut().load_sync(param_reader[offset .. ].reshape(self.cfg.out_chan), self.stream.conn());
+      offset += self.cfg.out_chan;
+    }
     offset - init_offset
   }
 
@@ -734,17 +736,21 @@ impl<S> DiffOperatorIo<[f32]> for DeviceConv2dOperator<S, [f32]> {
     offset += param_writer.write_buf(offset, self.hbias.as_slice());*/
     self.weights.val.as_ref().as_view().store_sync(param_writer[offset .. ].reshape_mut((self.cfg.kernel_w, self.cfg.kernel_h, self.cfg.in_dim.2, self.cfg.out_chan)), self.stream.conn());
     offset += self.cfg.kernel_w * self.cfg.kernel_h * self.cfg.in_dim.2 * self.cfg.out_chan;
-    self.bias.val.as_ref().as_view().store_sync(param_writer[offset .. ].reshape_mut(self.cfg.out_chan), self.stream.conn());
-    offset += self.cfg.out_chan;
+    if self.cfg.bias {
+      self.bias.val.as_ref().as_view().store_sync(param_writer[offset .. ].reshape_mut(self.cfg.out_chan), self.stream.conn());
+      offset += self.cfg.out_chan;
+    }
     offset - init_offset
   }
 
   fn _store_grad(&mut self, init_offset: usize, grad_writer: &mut [f32]) -> usize {
-    self.weights.grad.as_ref().as_view().store_sync(self.hweights.as_view_mut(), self.stream.conn());
-    self.bias.grad.as_ref().as_view().store_sync(self.hbias.as_view_mut(), self.stream.conn());
     let mut offset = init_offset;
+    self.weights.grad.as_ref().as_view().store_sync(self.hweights.as_view_mut(), self.stream.conn());
     offset += grad_writer.write_buf(offset, self.hweights.as_slice());
-    offset += grad_writer.write_buf(offset, self.hbias.as_slice());
+    if self.cfg.bias {
+      self.bias.grad.as_ref().as_view().store_sync(self.hbias.as_view_mut(), self.stream.conn());
+      offset += grad_writer.write_buf(offset, self.hbias.as_slice());
+    }
     offset - init_offset
   }
 
@@ -752,8 +758,10 @@ impl<S> DiffOperatorIo<[f32]> for DeviceConv2dOperator<S, [f32]> {
     let mut offset = init_offset;
     self.weights.r_dir.as_mut().as_view_mut().load_sync(dir_reader[offset .. ].reshape((self.cfg.kernel_w, self.cfg.kernel_h, self.cfg.in_dim.2, self.cfg.out_chan)), self.stream.conn());
     offset += self.cfg.kernel_w * self.cfg.kernel_h * self.cfg.in_dim.2 * self.cfg.out_chan;
-    self.bias.r_dir.as_mut().as_view_mut().load_sync(dir_reader[offset .. ].reshape(self.cfg.out_chan), self.stream.conn());
-    offset += self.cfg.out_chan;
+    if self.cfg.bias {
+      self.bias.r_dir.as_mut().as_view_mut().load_sync(dir_reader[offset .. ].reshape(self.cfg.out_chan), self.stream.conn());
+      offset += self.cfg.out_chan;
+    }
     offset - init_offset
   }
 }
@@ -762,39 +770,45 @@ impl<S> DiffOperatorIo<DeviceMem<f32>> for DeviceConv2dOperator<S, DeviceMem<f32
   fn _load_diff_param(&mut self, init_offset: usize, param_reader: &mut DeviceMem<f32>) -> usize {
     let mut offset = init_offset;
     let w_len = self.weights.val.as_mut().dim().flat_len();
-    let b_len = self.bias.val.as_mut().dim().flat_len();
     self.weights.val.as_mut().as_view_mut().reshape_mut(w_len)
       .copy(param_reader.as_ref().slice(offset, offset + w_len).reshape(w_len), self.stream.conn());
     offset += w_len;
-    self.bias.val.as_mut().as_view_mut()
-      .copy(param_reader.as_ref().slice(offset, offset + b_len).reshape(b_len), self.stream.conn());
-    offset += b_len;
+    if self.cfg.bias {
+      let b_len = self.bias.val.as_mut().dim().flat_len();
+      self.bias.val.as_mut().as_view_mut()
+        .copy(param_reader.as_ref().slice(offset, offset + b_len).reshape(b_len), self.stream.conn());
+      offset += b_len;
+    }
     offset - init_offset
   }
 
   fn _store_diff_param(&mut self, init_offset: usize, param_writer: &mut DeviceMem<f32>) -> usize {
     let mut offset = init_offset;
     let w_len = self.weights.val.as_ref().dim().flat_len();
-    let b_len = self.bias.val.as_ref().dim().flat_len();
     param_writer.as_mut().slice_mut(offset, offset + w_len).reshape_mut(w_len)
       .copy(self.weights.val.as_ref().as_view().reshape(w_len), self.stream.conn());
     offset += w_len;
-    param_writer.as_mut().slice_mut(offset, offset + b_len).reshape_mut(b_len)
-      .copy(self.bias.val.as_ref().as_view(), self.stream.conn());
-    offset += b_len;
+    if self.cfg.bias {
+      let b_len = self.bias.val.as_ref().dim().flat_len();
+      param_writer.as_mut().slice_mut(offset, offset + b_len).reshape_mut(b_len)
+        .copy(self.bias.val.as_ref().as_view(), self.stream.conn());
+      offset += b_len;
+    }
     offset - init_offset
   }
 
   fn _store_grad(&mut self, init_offset: usize, grad_writer: &mut DeviceMem<f32>) -> usize {
     let mut offset = init_offset;
     let w_len = self.weights.val.as_ref().dim().flat_len();
-    let b_len = self.bias.val.as_ref().dim().flat_len();
     grad_writer.as_mut().slice_mut(offset, offset + w_len).reshape_mut(w_len)
       .copy(self.weights.grad.as_ref().as_view().reshape(w_len), self.stream.conn());
     offset += w_len;
-    grad_writer.as_mut().slice_mut(offset, offset + b_len).reshape_mut(b_len)
-      .copy(self.bias.grad.as_ref().as_view(), self.stream.conn());
-    offset += b_len;
+    if self.cfg.bias {
+      let b_len = self.bias.val.as_ref().dim().flat_len();
+      grad_writer.as_mut().slice_mut(offset, offset + b_len).reshape_mut(b_len)
+        .copy(self.bias.grad.as_ref().as_view(), self.stream.conn());
+      offset += b_len;
+    }
     offset - init_offset
   }
 }
@@ -817,7 +831,11 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
   }
 
   fn _diff_param_sz(&self) -> usize {
-    self.cfg.kernel_w * self.cfg.kernel_h * self.cfg.in_dim.2 * self.cfg.out_chan + self.cfg.out_chan
+    if self.cfg.bias {
+      self.cfg.kernel_w * self.cfg.kernel_h * self.cfg.in_dim.2 * self.cfg.out_chan + self.cfg.out_chan
+    } else {
+      self.cfg.kernel_w * self.cfg.kernel_h * self.cfg.in_dim.2 * self.cfg.out_chan
+    }
   }
 
   fn _init_param(&mut self, rng: &mut Xorshiftplus128Rng) {
@@ -872,7 +890,9 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
     let in_buf = self.in_.buf.borrow();
     in_buf.as_ref().wait(&self.stream.conn());
     self.weights.val.as_ref().as_view().wait(&self.stream.conn());
-    self.bias.val.as_ref().as_view().wait(&self.stream.conn());
+    if self.cfg.bias {
+      self.bias.val.as_ref().as_view().wait(&self.stream.conn());
+    }
     self.tmp_buf.as_ref().wait(&self.stream.conn());
     self.scratch.as_ref().wait(&self.stream.conn());
     self.fwd.set_batch_size(batch_size).unwrap();
@@ -900,7 +920,9 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
     }
     in_buf.as_ref().post(&self.stream.conn());
     self.weights.val.as_ref().as_view().post(&self.stream.conn());
-    self.bias.val.as_ref().as_view().post(&self.stream.conn());
+    if self.cfg.bias {
+      self.bias.val.as_ref().as_view().post(&self.stream.conn());
+    }
     self.tmp_buf.as_ref().post(&self.stream.conn());
     self.scratch.as_ref().post(&self.stream.conn());
 
@@ -918,7 +940,9 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
     in_buf.as_ref().wait(&self.stream.conn());
     self.tmp_grad.as_ref().wait(&self.stream.conn());
     self.weights.grad.as_mut().as_view().wait(&self.stream.conn());
-    self.bias.grad.as_mut().as_view().wait(&self.stream.conn());
+    if self.cfg.bias {
+      self.bias.grad.as_mut().as_view().wait(&self.stream.conn());
+    }
     self.scratch.as_ref().wait(&self.stream.conn());
     self.bwd_w.set_batch_size(batch_size).unwrap();
     unsafe { self.bwd_w.backward_filter(
@@ -941,8 +965,10 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
     }
     in_buf.as_ref().post(&self.stream.conn());
     self.tmp_grad.as_ref().post(&self.stream.conn());
-    self.weights.grad.as_ref().as_view().post(&self.stream.conn());
-    self.bias.grad.as_ref().as_view().post(&self.stream.conn());
+    self.weights.grad.as_mut().as_view().post(&self.stream.conn());
+    if self.cfg.bias {
+      self.bias.grad.as_mut().as_view().post(&self.stream.conn());
+    }
     self.scratch.as_ref().post(&self.stream.conn());
 
     if let Some(ref in_grad) = self.in_.grad.as_ref() {
@@ -976,7 +1002,9 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
     self.in_.data.r_val.as_ref().as_ref().wait(&self.stream.conn());
     self.weights.val.as_ref().as_view().wait(&self.stream.conn());
     self.weights.r_dir.as_ref().as_view().wait(&self.stream.conn());
-    self.bias.r_dir.as_ref().as_view().wait(&self.stream.conn());
+    if self.cfg.bias {
+      self.bias.r_dir.as_ref().as_view().wait(&self.stream.conn());
+    }
     self.tmp.r_val.as_mut().as_ref().wait(&self.stream.conn());
     self.scratch.as_ref().wait(&self.stream.conn());
     self.fwd.set_batch_size(batch_size).unwrap();
@@ -1018,7 +1046,9 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
     self.in_.data.r_val.as_ref().as_ref().post(&self.stream.conn());
     self.weights.val.as_ref().as_view().post(&self.stream.conn());
     self.weights.r_dir.as_ref().as_view().post(&self.stream.conn());
-    self.bias.r_dir.as_ref().as_view().post(&self.stream.conn());
+    if self.cfg.bias {
+      self.bias.r_dir.as_ref().as_view().post(&self.stream.conn());
+    }
     self.tmp.r_val.as_mut().as_ref().post(&self.stream.conn());
     self.scratch.as_ref().post(&self.stream.conn());
 
@@ -1026,7 +1056,72 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
   }
 
   fn _r_backward(&mut self) {
+    // FIXME(20170125)
     unimplemented!();
+    let batch_size = self.out.batch_sz.get();
+
+    let out_grad = self.out.grad.as_ref().unwrap().borrow();
+    self.act_kern._backward(batch_size, self.tmp_buf.as_ref(), out_grad.as_ref(), self.tmp_grad.as_mut(), self.stream.conn());
+
+    let in_buf = self.in_.buf.borrow();
+    in_buf.as_ref().wait(&self.stream.conn());
+    self.tmp_grad.as_ref().wait(&self.stream.conn());
+    self.weights.r_grad.as_mut().as_view().wait(&self.stream.conn());
+    if self.cfg.bias {
+      self.bias.r_grad.as_mut().as_view().wait(&self.stream.conn());
+    }
+    self.scratch.as_ref().wait(&self.stream.conn());
+    self.bwd_w.set_batch_size(batch_size).unwrap();
+    unsafe { self.bwd_w.backward_filter(
+        1.0,
+        in_buf.as_ref().as_ptr(),
+        self.tmp_grad.as_ref().as_ptr(),
+        1.0,
+        self.weights.grad.as_mut().as_view_mut().as_mut_ptr(),
+        self.scratch.as_mut().as_mut_ptr(),
+        &*self.stream.conn().cudnn(),
+    ).unwrap() };
+    unsafe { self.bwd_w.backward_filter(
+        1.0,
+        in_buf.as_ref().as_ptr(),
+        self.tmp_grad.as_ref().as_ptr(),
+        1.0,
+        self.weights.grad.as_mut().as_view_mut().as_mut_ptr(),
+        self.scratch.as_mut().as_mut_ptr(),
+        &*self.stream.conn().cudnn(),
+    ).unwrap() };
+    if self.cfg.bias {
+      unimplemented!();
+    }
+    in_buf.as_ref().post(&self.stream.conn());
+    self.tmp_grad.as_ref().post(&self.stream.conn());
+    self.weights.r_grad.as_mut().as_view().post(&self.stream.conn());
+    if self.cfg.bias {
+      self.bias.r_grad.as_mut().as_view().post(&self.stream.conn());
+    }
+    self.scratch.as_ref().post(&self.stream.conn());
+
+    if let Some(ref in_grad) = self.in_.grad.as_ref() {
+      let mut in_grad = in_grad.borrow_mut();
+      in_grad.as_ref().wait(&self.stream.conn());
+      self.tmp_grad.as_ref().wait(&self.stream.conn());
+      self.weights.val.as_ref().as_view().wait(&self.stream.conn());
+      self.scratch.as_ref().wait(&self.stream.conn());
+      self.bwd_d.set_batch_size(batch_size).unwrap();
+      unsafe { self.bwd_d.backward_data(
+          1.0,
+          self.weights.val.as_ref().as_view().as_ptr(),
+          self.tmp_grad.as_ref().as_ptr(),
+          0.0,
+          in_grad.as_mut().as_mut_ptr(),
+          self.scratch.as_mut().as_mut_ptr(),
+          &*self.stream.conn().cudnn(),
+      ).unwrap() };
+      in_grad.as_ref().post(&self.stream.conn());
+      self.tmp_grad.as_ref().post(&self.stream.conn());
+      self.weights.val.as_ref().as_view().post(&self.stream.conn());
+      self.scratch.as_ref().post(&self.stream.conn());
+    }
   }
 
   fn _dump_input(&mut self) -> Vec<u8> {

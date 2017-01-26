@@ -224,6 +224,28 @@ extern "C" {
       in_delta: *mut f32,
       stream: cudaStream_t);
 
+  pub fn neuralops_cuda_lst_sq_fwd(
+      in_buf: *const f32,
+      batch_sz: size_t,
+      targets: *const f32,
+      weights: *const f32,
+      loss: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_lst_sq_bwd(
+      in_buf: *const f32,
+      batch_sz: size_t,
+      targets: *const f32,
+      weights: *const f32,
+      in_grad: *mut f32,
+      stream: cudaStream_t);
+  pub fn neuralops_cuda_lst_sq_rfwd(
+      in_buf: *const f32,
+      batch_sz: size_t,
+      r_in_buf: *const f32,
+      targets: *const f32,
+      jac_targ: *const f32,
+      r_loss: *mut f32,
+      stream: cudaStream_t);
   pub fn neuralops_cuda_ind_lst_sq_fwd(
       in_buf: *const f32,
       dim: size_t,
@@ -291,6 +313,33 @@ extern "C" {
       xs_sum: *mut f32,
       stream: cudaStream_t);
 
+  pub fn neuralops_cuda_softmax_kl_loss_fwd(
+      ys: *const f32,
+      dim: u32,
+      batch_sz: u32,
+      targets: *const f32,
+      loss: *mut f32,
+      stream: cudaStream_t,
+  );
+  pub fn neuralops_cuda_softmax_kl_loss_bwd(
+      ys: *const f32,
+      dim: u32,
+      batch_sz: u32,
+      targets: *const f32,
+      grad: *mut f32,
+      stream: cudaStream_t,
+  );
+  pub fn neuralops_cuda_softmax_kl_loss_rfwd(
+      ys: *const f32,
+      dim: u32,
+      batch_sz: u32,
+      r_xs: *const f32,
+      r_mean: *const f32,
+      targets: *const f32,
+      r_loss: *mut f32,
+      r_grad: *mut f32,
+      stream: cudaStream_t,
+  );
   pub fn neuralops_cuda_softmax_nll_loss_fwd(
       in_buf: *const f32,
       num_classes: size_t,

@@ -1,6 +1,139 @@
 #include <cuda_runtime_api.h>
 #include <stdint.h>
 
+#define OFFSET_BANK(idx) ({ __typeof__ (idx) _idx = idx; ((_idx) + ((_idx) / 32)); })
+
+__global__ void softmax_kl_loss_fwd_kernel(
+    const float *ys,
+    uint32_t dim,
+    uint32_t batch_sz,
+    const float *targets,
+    float *loss)
+{
+  __shared__ float cache[1024 + 32];
+  uint32_t j = threadIdx.x;
+  uint32_t batch_idx = blockIdx.x;
+  uint32_t idx = j + dim * batch_idx;
+  if (j < dim && batch_idx < batch_sz) {
+    float t = targets[idx];
+    float y = ys[idx];
+    float kl_j = t * (logf(t) - logf(y));
+    cache[OFFSET_BANK(j)] = kl_j;
+  } else {
+    cache[OFFSET_BANK(j)] = 0.0f;
+  }
+  __syncthreads();
+  for (int s = 1; s < blockDim.x; s *= 2) {
+    if (j < dim && batch_idx < batch_sz) {
+      if (j % (2*s) == 0 && (j + s) < dim && cache[OFFSET_BANK(j)] < cache[OFFSET_BANK(j + s)]) {
+        cache[OFFSET_BANK(j)] = cache[OFFSET_BANK(j + s)];
+      }
+    }
+    __syncthreads();
+  }
+  if (j < dim && batch_idx < batch_sz) {
+    if (j == 0) {
+      loss[batch_idx] = cache[0];
+    }
+  }
+}
+
+extern "C" void neuralops_cuda_softmax_kl_loss_fwd(
+    const float *ys,
+    uint32_t dim,
+    uint32_t batch_sz,
+    const float *targets,
+    float *loss,
+    cudaStream_t stream)
+{
+  //assert(dim <= 1024);
+  softmax_kl_loss_fwd_kernel<<<batch_sz, 1024, 0, stream>>>(
+      ys, dim, batch_sz, targets, loss);
+}
+
+__global__ void softmax_kl_loss_bwd_kernel(
+    const float *ys,
+    uint32_t dim,
+    uint32_t batch_sz,
+    const float *targets,
+    float *grad)
+{
+  uint32_t idx = threadIdx.x + blockIdx.x * blockDim.x;
+  uint32_t j = idx % dim;
+  uint32_t batch_idx = idx / dim;
+  if (j < dim && batch_idx < batch_sz) {
+    float t = targets[idx];
+    float y = ys[idx];
+    grad[idx] = y - t;
+  }
+}
+
+extern "C" void neuralops_cuda_softmax_kl_loss_bwd(
+    const float *ys,
+    uint32_t dim,
+    uint32_t batch_sz,
+    const float *targets,
+    float *grad,
+    cudaStream_t stream)
+{
+  uint32_t n = dim * batch_sz;
+  softmax_kl_loss_bwd_kernel<<<(n+1024-1)/1024, 1024, 0, stream>>>(
+      ys, dim, batch_sz, targets, grad);
+}
+
+__global__ void softmax_kl_loss_rfwd_kernel(
+    const float *ys,
+    uint32_t dim,
+    uint32_t batch_sz,
+    const float *r_xs,
+    const float *r_mean,
+    const float *targets,
+    float *r_loss,
+    float *r_grad)
+{
+  __shared__ float cache[1024 + 32];
+  uint32_t j = threadIdx.x;
+  uint32_t batch_idx = blockIdx.x;
+  uint32_t idx = j + dim * batch_idx;
+  if (j < dim && batch_idx < batch_sz) {
+    float r_yp_i = r_xs[idx] - r_mean[batch_idx];
+    r_grad[idx] = ys[idx] * r_yp_i;
+    cache[OFFSET_BANK(j)] = -targets[idx] * r_yp_i;
+  } else {
+    cache[OFFSET_BANK(j)] = 0.0f;
+  }
+  __syncthreads();
+  for (int s = 1; s < blockDim.x; s *= 2) {
+    if (j < dim && batch_idx < batch_sz) {
+      if (j % (2*s) == 0 && (j + s) < dim && cache[OFFSET_BANK(j)] < cache[OFFSET_BANK(j + s)]) {
+        cache[OFFSET_BANK(j)] = cache[OFFSET_BANK(j + s)];
+      }
+    }
+    __syncthreads();
+  }
+  if (j < dim && batch_idx < batch_sz) {
+    if (j == 0) {
+      r_loss[batch_idx] = cache[0];
+    }
+  }
+}
+
+extern "C" void neuralops_cuda_softmax_kl_loss_rfwd(
+    const float *ys,
+    uint32_t dim,
+    uint32_t batch_sz,
+    const float *r_xs,
+    const float *r_mean,
+    const float *targets,
+    float *r_loss,
+    float *r_grad,
+    cudaStream_t stream)
+{
+  //assert(dim <= 1024);
+  softmax_kl_loss_rfwd_kernel<<<batch_sz, 1024, 0, stream>>>(
+      ys, dim, batch_sz, r_xs, r_mean, targets, r_loss, r_grad);
+}
+
 __global__ void softmax_nll_loss_fwd_kernel(
     const float *out_act,
     int dim,
