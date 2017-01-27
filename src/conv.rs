@@ -710,6 +710,10 @@ impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceConv2dOperator<S, IoBuf> 
   default fn _load_direction(&mut self, init_offset: usize, dir_reader: &mut IoBuf) -> usize {
     unimplemented!();
   }
+
+  default fn _store_r_grad(&mut self, init_offset: usize, grad_writer: &mut IoBuf) -> usize {
+    unimplemented!();
+  }
 }
 
 impl<S> DiffOperatorIo<[f32]> for DeviceConv2dOperator<S, [f32]> {
@@ -761,6 +765,17 @@ impl<S> DiffOperatorIo<[f32]> for DeviceConv2dOperator<S, [f32]> {
     if self.cfg.bias {
       self.bias.r_dir.as_mut().as_view_mut().load_sync(dir_reader[offset .. ].reshape(self.cfg.out_chan), self.stream.conn());
       offset += self.cfg.out_chan;
+    }
+    offset - init_offset
+  }
+
+  fn _store_r_grad(&mut self, init_offset: usize, grad_writer: &mut [f32]) -> usize {
+    let mut offset = init_offset;
+    self.weights.r_grad.as_ref().as_view().store_sync(self.hweights.as_view_mut(), self.stream.conn());
+    offset += grad_writer.write_buf(offset, self.hweights.as_slice());
+    if self.cfg.bias {
+      self.bias.r_grad.as_ref().as_view().store_sync(self.hbias.as_view_mut(), self.stream.conn());
+      offset += grad_writer.write_buf(offset, self.hbias.as_slice());
     }
     offset - init_offset
   }
@@ -880,6 +895,11 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceConv2dOperator<S, IoBuf>
   fn _reset_grad(&mut self) {
     self.weights.grad.as_mut().as_view_mut().set_constant(0.0, self.stream.conn());
     self.bias.grad.as_mut().as_view_mut().set_constant(0.0, self.stream.conn());
+  }
+
+  fn _reset_r_grad(&mut self) {
+    self.weights.r_grad.as_mut().as_view_mut().set_constant(0.0, self.stream.conn());
+    self.bias.r_grad.as_mut().as_view_mut().set_constant(0.0, self.stream.conn());
   }
 
   fn _forward(&mut self, _phase: OpPhase) {

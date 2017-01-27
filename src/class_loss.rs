@@ -127,6 +127,7 @@ impl<IoBuf: ?Sized> DiffOperatorData<SampleItem> for DeviceSoftmaxKLLoss<SampleI
     for (idx, sample) in samples.iter().enumerate() {
       if sample.kvs.contains::<SampleVectorTargetKey>() {
         let target = sample.kvs.get::<SampleVectorTargetKey>().unwrap();
+        assert_eq!(target.len(), self.cfg.num_cats);
         self.h_target[idx * self.cfg.num_cats .. (idx+1) * self.cfg.num_cats].copy_from_slice(target);
       } else {
         panic!("DeviceSoftmaxKLLoss requires a vector target");
@@ -167,6 +168,15 @@ impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxKLLoss<Samp
         self.loss.as_mut(),
         self.stream.conn(),
     );
+    self.prob.as_ref().store_sync(&mut self.h_prob, self.stream.conn());
+    self.loss.as_ref().store_sync(&mut self.h_loss, self.stream.conn());
+    for idx in 0 .. batch_size {
+      let epsilon = 1.0e-6;
+      if self.h_loss[idx] < -epsilon {
+        println!("WARNING: KL divergence bound failed: {:?}", &self.h_loss);
+        assert!(self.h_loss[idx] >= -epsilon);
+      }
+    }
   }
 
   fn _backward(&mut self) {

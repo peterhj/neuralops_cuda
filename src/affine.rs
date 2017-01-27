@@ -101,6 +101,10 @@ impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceAffineOperator<S, IoBuf> 
   default fn _load_direction(&mut self, init_offset: usize, dir_reader: &mut IoBuf) -> usize {
     unimplemented!();
   }
+
+  default fn _store_r_grad(&mut self, init_offset: usize, grad_writer: &mut IoBuf) -> usize {
+    unimplemented!();
+  }
 }
 
 impl<S> DiffOperatorIo<[f32]> for DeviceAffineOperator<S, [f32]> {
@@ -144,6 +148,17 @@ impl<S> DiffOperatorIo<[f32]> for DeviceAffineOperator<S, [f32]> {
     if self.cfg.bias {
       offset += dir_reader.read_buf(offset, self.hbias.as_mut_slice());
       self.bias.r_dir.as_mut().as_view_mut().load_sync(self.hbias.as_view(), self.stream.conn());
+    }
+    offset - init_offset
+  }
+
+  fn _store_r_grad(&mut self, init_offset: usize, grad_writer: &mut [f32]) -> usize {
+    let mut offset = init_offset;
+    self.weights.r_grad.as_ref().as_view().store_sync(self.hweights.as_view_mut(), self.stream.conn());
+    offset += grad_writer.write_buf(offset, self.hweights.as_slice());
+    if self.cfg.bias {
+      self.bias.r_grad.as_ref().as_view().store_sync(self.hbias.as_view_mut(), self.stream.conn());
+      offset += grad_writer.write_buf(offset, self.hbias.as_slice());
     }
     offset - init_offset
   }
@@ -264,6 +279,11 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceAffineOperator<S, IoBuf>
   fn _reset_grad(&mut self) {
     self.weights.grad.as_mut().as_view_mut().set_constant(0.0, self.stream.conn());
     self.bias.grad.as_mut().as_view_mut().set_constant(0.0, self.stream.conn());
+  }
+
+  fn _reset_r_grad(&mut self) {
+    self.weights.r_grad.as_mut().as_view_mut().set_constant(0.0, self.stream.conn());
+    self.bias.r_grad.as_mut().as_view_mut().set_constant(0.0, self.stream.conn());
   }
 
   fn _forward(&mut self, _phase: OpPhase) {
@@ -442,7 +462,7 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceAffineOperator<S, IoBuf>
     self.act_kern._r_backward(batch_size, self.tmp_buf.as_ref(), self.tmp.r_val.as_ref().as_ref(), self.out.data.r_grad.as_ref().as_ref(), self.tmp.r_grad.as_mut().as_mut(), self.stream.conn());
 
     let in_buf = self.in_.buf.borrow();
-    self.weights.grad.as_mut().as_view_mut()
+    self.weights.r_grad.as_mut().as_view_mut()
       .matrix_prod(
           1.0,
           self.tmp_grad.as_ref().reshape((self.cfg.out_dim, batch_size)), Transpose::N,
@@ -450,7 +470,7 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceAffineOperator<S, IoBuf>
           1.0,
           self.stream.conn(),
       );
-    self.weights.grad.as_mut().as_view_mut()
+    self.weights.r_grad.as_mut().as_view_mut()
       .matrix_prod(
           1.0,
           self.tmp.r_grad.as_ref().as_ref().reshape((self.cfg.out_dim, batch_size)), Transpose::N,
