@@ -3,6 +3,72 @@
 
 #define OFFSET_BANK(idx) ({ __typeof__ (idx) _idx = idx; ((_idx) + ((_idx) / 32)); })
 
+__global__ void softmax_ind_loss_fwd_kernel(
+    const float *ys,
+    uint32_t dim,
+    uint32_t batch_sz,
+    const uint32_t *labels,
+    const float *weights,
+    float *loss)
+{
+  uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+  uint32_t j = idx % dim;
+  uint32_t batch_idx = idx / dim;
+  if (j < dim && batch_idx < batch_sz) {
+    uint32_t label = labels[batch_idx];
+    loss[batch_idx] = weights[batch_idx] * ys[label + dim * batch_idx];
+  }
+}
+
+extern "C" void neuralops_cuda_softmax_ind_loss_fwd(
+    const float *ys,
+    uint32_t dim,
+    uint32_t batch_sz,
+    const uint32_t *labels,
+    const float *weights,
+    float *loss,
+    cudaStream_t stream)
+{
+  softmax_ind_loss_fwd_kernel<<<(batch_sz+1024-1)/1024, 1024, 0, stream>>>(
+      ys, dim, batch_sz, labels, weights, loss);
+}
+
+__global__ void softmax_ind_loss_bwd_kernel(
+    const float *ys,
+    uint32_t dim,
+    uint32_t batch_sz,
+    const uint32_t *labels,
+    const float *weights,
+    float *grad)
+{
+  uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+  uint32_t j = idx % dim;
+  uint32_t batch_idx = idx / dim;
+  if (j < dim && batch_idx < batch_sz) {
+    uint32_t label = labels[batch_idx];
+    float w = weights[batch_idx];
+    float y_j = ys[idx];
+    if (label == j) {
+      grad[idx] = w * y_j * (1.0f - y_j);
+    } else {
+      grad[idx] = -w * y_j * ys[label + dim * batch_idx];
+    }
+  }
+}
+
+extern "C" void neuralops_cuda_softmax_ind_loss_bwd(
+    const float *ys,
+    uint32_t dim,
+    uint32_t batch_sz,
+    const uint32_t *labels,
+    const float *weights,
+    float *grad,
+    cudaStream_t stream)
+{
+  softmax_ind_loss_bwd_kernel<<<(batch_sz+1024-1)/1024, 1024, 0, stream>>>(
+      ys, dim, batch_sz, labels, weights, grad);
+}
+
 __global__ void softmax_kl_loss_fwd_kernel(
     const float *ys,
     uint32_t dim,

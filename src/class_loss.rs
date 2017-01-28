@@ -1,6 +1,6 @@
 use prelude::*;
 use kernels::*;
-use softmax::{DeviceSoftmaxKLKernel, DeviceSoftmaxNLLKernel};
+use softmax::*;
 
 use densearray::prelude::*;
 use devicemem_cuda::prelude::*;
@@ -17,13 +17,201 @@ use std::cell::{RefCell};
 use std::rc::{Rc};
 
 #[derive(Clone)]
-pub struct CategoricalKLLossConfig {
+pub struct CategoricalLossConfig {
   pub batch_sz: usize,
   pub num_cats: usize,
 }
 
+pub struct DeviceSoftmaxIndLoss<S, IoBuf: ?Sized> {
+  cfg:      CategoricalLossConfig,
+  node:     OperatorNode,
+  stream:   DeviceStream,
+  in_op:    Rc<RefCell<DiffOperator<S, IoBuf>>>,
+  in_:      DeviceOutput,
+  prob:     DeviceMem<f32>,
+  loss:     DeviceMem<f32>,
+  label:    DeviceMem<u32>,
+  weight:   DeviceMem<f32>,
+  h_prob:   Vec<f32>,
+  h_loss:   Vec<f32>,
+  h_label:  Vec<u32>,
+  h_weight: Vec<f32>,
+  softmax:  DeviceSoftmaxIndKernel,
+}
+
+impl<S, IoBuf: ?Sized> DeviceSoftmaxIndLoss<S, IoBuf> {
+  pub fn new<InOp>(cfg: CategoricalLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxIndLoss<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
+    let in_ = prev_op.borrow()._output(prev_arm);
+    let mut h_prob = Vec::with_capacity(cfg.batch_sz * cfg.num_cats);
+    h_prob.resize(cfg.batch_sz * cfg.num_cats, 0.0);
+    let mut h_loss = Vec::with_capacity(cfg.batch_sz);
+    h_loss.resize(cfg.batch_sz, 0.0);
+    /*let mut h_target = Vec::with_capacity(cfg.batch_sz * cfg.num_cats);
+    h_target.resize(cfg.batch_sz * cfg.num_cats, 0.0);*/
+    let mut h_label = Vec::with_capacity(cfg.batch_sz);
+    h_label.resize(cfg.batch_sz, 0);
+    let mut h_weight = Vec::with_capacity(cfg.batch_sz);
+    h_weight.resize(cfg.batch_sz, 0.0);
+    Rc::new(RefCell::new(DeviceSoftmaxIndLoss{
+      cfg:      cfg.clone(),
+      node:     OperatorNode::default(),
+      stream:   stream.clone(),
+      in_op:    prev_op,
+      in_:      in_,
+      //out:      DeviceOutput::new(cfg.batch_sz, 1, cap, stream.clone()),
+      prob:     DeviceMem::zeros(cfg.batch_sz * cfg.num_cats, stream.conn()),
+      loss:     DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      //r_loss:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      //target:   DeviceMem::zeros(cfg.batch_sz * cfg.num_cats, stream.conn()),
+      label:    DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      weight:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      h_prob:   h_prob,
+      h_loss:   h_loss,
+      //h_target: h_target,
+      h_label:  h_label,
+      h_weight: h_weight,
+      softmax:  DeviceSoftmaxIndKernel::new(cfg.batch_sz, cfg.num_cats, stream.clone()),
+    }))
+  }
+}
+
+impl<S, IoBuf: ?Sized> Operator for DeviceSoftmaxIndLoss<S, IoBuf> {
+  fn _next(&self) -> u64 {
+    self.node._next()
+  }
+}
+
+impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceSoftmaxIndLoss<SampleItem, IoBuf> {
+  fn reset_loss(&mut self) {
+    // FIXME(20170125): should reset the (scalar) loss accumulator, once it is implemented.
+  }
+
+  fn store_loss(&mut self) {
+  }
+
+  fn get_loss(&mut self) -> f32 {
+    unimplemented!();
+  }
+
+  fn set_jacobian_target_with_r_loss(&mut self) {
+    unimplemented!();
+  }
+
+  fn _store_accuracy(&mut self) {
+  }
+
+  fn _get_accuracy(&mut self) -> usize {
+    unimplemented!();
+  }
+
+  fn _store_loss(&mut self) {
+  }
+
+  fn _get_loss(&mut self) -> &[f32] {
+    &self.h_loss
+  }
+
+  fn _store_pred(&mut self) {
+  }
+
+  fn _get_pred(&mut self) -> &[f32] {
+    &self.h_prob
+  }
+}
+
+impl<S, IoBuf: ?Sized> DiffOperatorData<S> for DeviceSoftmaxIndLoss<S, IoBuf> {
+  default fn _load_batch(&mut self, samples: &[S]) {
+    unimplemented!();
+  }
+}
+
+impl<IoBuf: ?Sized> DiffOperatorData<SampleItem> for DeviceSoftmaxIndLoss<SampleItem, IoBuf> {
+  fn _load_batch(&mut self, samples: &[SampleItem]) {
+    let actual_batch_size = samples.len();
+    assert!(actual_batch_size <= self.cfg.batch_sz);
+    for (idx, sample) in samples.iter().enumerate() {
+      if sample.kvs.contains::<SampleClassLabelKey>() {
+        let label = *sample.kvs.get::<SampleClassLabelKey>().unwrap();
+        assert!(label < self.cfg.num_cats as u32);
+        self.h_label[idx] = label;
+      } else {
+        panic!();
+      }
+      if sample.kvs.contains::<SampleWeightKey>() {
+        let weight = *sample.kvs.get::<SampleWeightKey>().unwrap();
+        self.h_weight[idx] = weight;
+      } else {
+        self.h_weight[idx] = 1.0;
+      }
+      /*if sample.kvs.contains::<SampleVectorTargetKey>() {
+        let target = sample.kvs.get::<SampleVectorTargetKey>().unwrap();
+        assert_eq!(target.len(), self.cfg.num_cats);
+        self.h_target[idx * self.cfg.num_cats .. (idx+1) * self.cfg.num_cats].copy_from_slice(target);
+      } else {
+        panic!("DeviceSoftmaxIndLoss requires a vector target");
+      }*/
+    }
+    self.label.as_mut().load_sync(&self.h_label, self.stream.conn());
+    self.weight.as_mut().load_sync(&self.h_weight, self.stream.conn());
+  }
+}
+
+impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceSoftmaxIndLoss<S, IoBuf> {
+}
+
+impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceSoftmaxIndLoss<SampleItem, IoBuf> {
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
+    self.node.push(epoch);
+    assert!(self.node.limit(1));
+    self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
+    apply(self);
+    self.node.pop(epoch);
+  }
+
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
+    self.node.push(epoch);
+    assert!(self.node.limit(1));
+    apply(self);
+    self.in_op.borrow_mut()._traverse_bwd(epoch, apply);
+    self.node.pop(epoch);
+  }
+
+  fn _forward(&mut self, _phase: OpPhase) {
+    let batch_size = self.in_.batch_sz.get();
+    let in_val = self.in_.buf.borrow();
+    self.softmax._forward(
+        batch_size,
+        in_val.as_ref(),
+        self.label.as_ref(),
+        self.weight.as_ref(),
+        self.prob.as_mut(),
+        self.loss.as_mut(),
+        self.stream.clone(),
+    );
+    self.prob.as_ref().store_sync(&mut self.h_prob, self.stream.conn());
+    self.loss.as_ref().store_sync(&mut self.h_loss, self.stream.conn());
+  }
+
+  fn _backward(&mut self) {
+    let batch_size = self.in_.batch_sz.get();
+    if let Some(ref in_grad) = self.in_.grad.as_ref() {
+      let mut in_grad = in_grad.borrow_mut();
+      self.softmax._backward(
+          batch_size,
+          self.prob.as_ref(),
+          self.label.as_ref(),
+          self.weight.as_ref(),
+          in_grad.as_mut(),
+          self.stream.clone(),
+      );
+    }
+  }
+}
+
+pub type CategoricalKLLossConfig = CategoricalLossConfig;
+
 pub struct DeviceSoftmaxKLLoss<S, IoBuf: ?Sized> {
-  cfg:      CategoricalKLLossConfig,
+  cfg:      CategoricalLossConfig,
   node:     OperatorNode,
   stream:   DeviceStream,
   in_op:    Rc<RefCell<DiffOperator<S, IoBuf>>>,
@@ -43,7 +231,7 @@ pub struct DeviceSoftmaxKLLoss<S, IoBuf: ?Sized> {
 }
 
 impl<S, IoBuf: ?Sized> DeviceSoftmaxKLLoss<S, IoBuf> {
-  pub fn new<InOp>(cfg: CategoricalKLLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxKLLoss<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
+  pub fn new<InOp>(cfg: CategoricalLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceSoftmaxKLLoss<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
     let in_ = prev_op.borrow()._output(prev_arm);
     let mut h_target = Vec::with_capacity(cfg.batch_sz * cfg.num_cats);
     h_target.resize(cfg.batch_sz * cfg.num_cats, 0.0);
@@ -85,7 +273,7 @@ impl<S, IoBuf: ?Sized> Operator for DeviceSoftmaxKLLoss<S, IoBuf> {
 
 impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceSoftmaxKLLoss<SampleItem, IoBuf> {
   fn reset_loss(&mut self) {
-    // FIXME(20170125)
+    // FIXME(20170125): should reset the (scalar) loss accumulator, once it is implemented.
   }
 
   fn store_loss(&mut self) {
@@ -104,6 +292,13 @@ impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceSoftmaxKLLoss<SampleIt
 
   fn _get_accuracy(&mut self) -> usize {
     unimplemented!();
+  }
+
+  fn _store_loss(&mut self) {
+  }
+
+  fn _get_loss(&mut self) -> &[f32] {
+    &self.h_loss
   }
 
   fn _store_pred(&mut self) {

@@ -7,6 +7,18 @@ use neuralops::prelude::*;
 
 use std::ptr::{null_mut};
 
+pub struct DeviceSoftmaxKernel {
+  batch_sz:     usize,
+  dim:          usize,
+  logit:        DeviceMem<f32>,
+  max_logit:    DeviceMem<f32>,
+  factor:       DeviceMem<f32>,
+  r_factor:     DeviceMem<f32>,
+  sum_factor:   DeviceMem<f32>,
+  sum_r_factor: DeviceMem<f32>,
+  r_mean:       DeviceMem<f32>,
+}
+
 pub struct DeviceSoftmaxNLLKernel {
   batch_sz:     usize,
   in_dim:       usize,
@@ -470,5 +482,130 @@ impl DeviceSoftmaxKLKernel {
     r_loss.post(&conn);
     r_grad.post(&conn);
     self.r_mean.as_ref().post(&conn);
+  }
+}
+
+pub struct DeviceSoftmaxIndKernel {
+  batch_sz:     usize,
+  dim:          usize,
+  logit:        DeviceMem<f32>,
+  max_logit:    DeviceMem<f32>,
+  factor:       DeviceMem<f32>,
+  sum_factor:   DeviceMem<f32>,
+}
+
+impl DeviceSoftmaxIndKernel {
+  pub fn new(batch_sz: usize, dim: usize, stream: DeviceStream) -> Self {
+    DeviceSoftmaxIndKernel{
+      batch_sz:     batch_sz,
+      dim:          dim,
+      logit:        DeviceMem::zeros(batch_sz * dim, stream.conn()),
+      max_logit:    DeviceMem::zeros(batch_sz, stream.conn()),
+      factor:       DeviceMem::zeros(batch_sz * dim, stream.conn()),
+      //r_factor:     DeviceMem::zeros(batch_sz * dim, stream.conn()),
+      sum_factor:   DeviceMem::zeros(batch_sz, stream.conn()),
+      //sum_r_factor: DeviceMem::zeros(batch_sz, stream.conn()),
+      //r_mean:       DeviceMem::zeros(batch_sz, stream.conn()),
+    }
+  }
+
+  pub fn _forward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, mut prob: DeviceMemRefMut<'a, f32>, mut loss: DeviceMemRefMut<'a, f32>, stream: DeviceStream) {
+    assert!(batch_size <= self.batch_sz);
+    assert!(self.dim <= 1024);
+
+    self.logit.as_mut().slice_mut(0, batch_size * self.dim).copy(in_buf.clone().slice(0, batch_size * self.dim), stream.conn());
+
+    in_buf.wait(&stream.conn());
+    self.logit.as_ref().wait(&stream.conn());
+    self.max_logit.as_ref().wait(&stream.conn());
+
+    unsafe { neuralops_cuda_blockreduce_max_argmax(
+        self.logit.as_ref().as_ptr(),
+        self.dim,
+        batch_size,
+        self.max_logit.as_mut().as_mut_ptr(),
+        null_mut(),
+        stream.conn().raw_stream().ptr,
+    ) };
+    unsafe { neuralops_cuda_batchmap_add(
+        self.logit.as_mut().as_mut_ptr(),
+        self.dim,
+        batch_size,
+        -1.0,
+        self.max_logit.as_ref().as_ptr(),
+        stream.conn().raw_stream().ptr,
+    ) };
+
+    in_buf.post(&stream.conn());
+    self.logit.as_ref().post(&stream.conn());
+    self.max_logit.as_ref().post(&stream.conn());
+
+    // FIXME: copy only `batch_size * self.dim` amount.
+    self.factor.as_mut().copy(self.logit.as_ref(), stream.conn());
+    self.factor.as_mut().reshape_mut(batch_size * self.dim).exp(stream.conn());
+
+    labels.wait(&stream.conn());
+    weights.wait(&stream.conn());
+    loss.wait(&stream.conn());
+    self.factor.as_ref().wait(&stream.conn());
+    self.sum_factor.as_ref().wait(&stream.conn());
+
+    unsafe { neuralops_cuda_blockreduce_sum(
+        self.factor.as_ref().as_ptr(),
+        self.dim,
+        batch_size,
+        0.0,
+        self.sum_factor.as_mut().as_mut_ptr(),
+        stream.conn().raw_stream().ptr,
+    ) };
+    unsafe { neuralops_cuda_batchmap_div(
+        self.factor.as_mut().as_mut_ptr(),
+        self.dim,
+        batch_size,
+        self.sum_factor.as_ref().as_ptr(),
+        stream.conn().raw_stream().ptr,
+    ) };
+    unsafe { neuralops_cuda_softmax_ind_loss_fwd(
+        self.factor.as_ref().as_ptr(),
+        self.dim as _,
+        batch_size as _,
+        labels.as_ptr(),
+        weights.as_ptr(),
+        loss.as_mut_ptr(),
+        stream.conn().raw_stream().ptr,
+    ) };
+
+    labels.post(&stream.conn());
+    weights.post(&stream.conn());
+    loss.post(&stream.conn());
+    self.factor.as_ref().post(&stream.conn());
+    self.sum_factor.as_ref().post(&stream.conn());
+
+    prob.slice_mut(0, batch_size * self.dim).copy(self.factor.as_ref().slice(0, batch_size * self.dim), stream.conn());
+  }
+
+  pub fn _backward<'a>(&'a self, batch_size: usize, prob: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, mut in_grad: DeviceMemRefMut<'a, f32>, stream: DeviceStream) {
+    assert!(batch_size <= self.batch_sz);
+
+    let conn = stream.conn();
+    prob.wait(&conn);
+    labels.wait(&conn);
+    weights.wait(&conn);
+    in_grad.wait(&conn);
+
+    unsafe { neuralops_cuda_softmax_ind_loss_bwd(
+        prob.as_ptr(),
+        self.dim as _,
+        batch_size as _,
+        labels.as_ptr(),
+        weights.as_ptr(),
+        in_grad.as_mut_ptr(),
+        conn.raw_stream().ptr,
+    ) };
+
+    prob.post(&conn);
+    labels.post(&conn);
+    weights.post(&conn);
+    in_grad.post(&conn);
   }
 }
