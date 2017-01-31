@@ -16,6 +16,160 @@ use std::cell::{RefCell};
 //use std::marker::{PhantomData};
 use std::rc::{Rc};
 
+pub struct DeviceGaussianLstSqKLLoss<S, IoBuf: ?Sized> {
+  cfg:      LstSqLossConfig,
+  node:     OperatorNode,
+  stream:   DeviceStream,
+  in_op:    Rc<RefCell<DiffOperator<S, IoBuf>>>,
+  in_:      DeviceOutput,
+  //out:      DeviceOutput,
+  loss:     DeviceMem<f32>,
+  //r_loss:   DeviceMem<f32>,
+  t_mean:   DeviceMem<f32>,
+  emp_var:  f32,
+  t_var:    f32,
+  h_pred:   Vec<f32>,
+  h_loss:   Vec<f32>,
+  h_t_mean: Vec<f32>,
+}
+
+impl<S, IoBuf: ?Sized> DeviceGaussianLstSqKLLoss<S, IoBuf> {
+  pub fn new<InOp>(cfg: LstSqLossConfig, cap: OpCapability, prev_op: Rc<RefCell<InOp>>, prev_arm: usize, stream: DeviceStream) -> Rc<RefCell<DeviceGaussianLstSqKLLoss<S, IoBuf>>> where InOp: 'static + DeviceOperator + DiffOperator<S, IoBuf> {
+    let in_ = prev_op.borrow()._output(prev_arm);
+    let mut h_pred = Vec::with_capacity(cfg.batch_sz);
+    h_pred.resize(cfg.batch_sz, 0.0);
+    let mut h_loss = Vec::with_capacity(cfg.batch_sz);
+    h_loss.resize(cfg.batch_sz, 0.0);
+    let mut h_t_mean = Vec::with_capacity(cfg.batch_sz);
+    h_t_mean.resize(cfg.batch_sz, 0.0);
+    Rc::new(RefCell::new(DeviceGaussianLstSqKLLoss{
+      cfg:      cfg,
+      node:     OperatorNode::default(),
+      stream:   stream.clone(),
+      in_op:    prev_op,
+      in_:      in_,
+      loss:     DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      //r_loss:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      t_mean:   DeviceMem::zeros(cfg.batch_sz, stream.conn()),
+      emp_var:  0.0,
+      t_var:    0.0,
+      h_pred:   h_pred,
+      h_loss:   h_loss,
+      h_t_mean: h_t_mean,
+    }))
+  }
+}
+
+impl<S, IoBuf: ?Sized> Operator for DeviceGaussianLstSqKLLoss<S, IoBuf> {
+  fn _next(&self) -> u64 {
+    self.node._next()
+  }
+}
+
+/*impl<S, IoBuf: ?Sized> DeviceOperator for DeviceGaussianLstSqKLLoss<S, IoBuf> /*where S: SampleLabel*/ {
+  fn _output(&self, arm: usize) -> DeviceOutput {
+    assert_eq!(0, arm);
+    self.out.clone()
+  }
+}*/
+
+impl<IoBuf: ?Sized> DiffLoss<SampleItem, IoBuf> for DeviceGaussianLstSqKLLoss<SampleItem, IoBuf> {
+  fn reset_loss(&mut self) {
+  }
+
+  fn store_loss(&mut self) {
+  }
+
+  fn get_loss(&mut self) -> f32 {
+    unimplemented!();
+  }
+
+  fn _store_pred(&mut self) {
+  }
+
+  fn _get_pred(&mut self) -> &[f32] {
+    &self.h_pred
+  }
+
+  fn _store_loss(&mut self) {
+  }
+
+  fn _get_loss(&mut self) -> &[f32] {
+    &self.h_loss
+  }
+}
+
+impl<S, IoBuf: ?Sized> DiffOperatorData<S> for DeviceGaussianLstSqKLLoss<S, IoBuf> {
+  default fn _load_batch(&mut self, samples: &[S]) {
+    unimplemented!();
+  }
+}
+
+impl<IoBuf: ?Sized> DiffOperatorData<SampleItem> for DeviceGaussianLstSqKLLoss<SampleItem, IoBuf> {
+  fn _load_batch(&mut self, samples: &[SampleItem]) {
+    let actual_batch_size = samples.len();
+    assert!(actual_batch_size <= self.cfg.batch_sz);
+    for (idx, sample) in samples.iter().enumerate() {
+      if let Some(target) = sample.kvs.get::<SampleVectorTargetKey>() {
+        assert_eq!(actual_batch_size + 2, target.len());
+        self.h_t_mean[ .. actual_batch_size].copy_from_slice(&target[ .. actual_batch_size]);
+        self.t_var = target[actual_batch_size];
+        self.emp_var = target[actual_batch_size + 1];
+      }
+    }
+    self.t_mean.as_mut().load_sync(&self.h_t_mean, self.stream.conn());
+  }
+}
+
+impl<S, IoBuf: ?Sized> DiffOperatorIo<IoBuf> for DeviceGaussianLstSqKLLoss<S, IoBuf> {
+}
+
+impl<IoBuf: ?Sized> DiffOperator<SampleItem, IoBuf> for DeviceGaussianLstSqKLLoss<SampleItem, IoBuf> {
+  fn _traverse_fwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
+    self.node.push(epoch);
+    assert!(self.node.limit(1));
+    self.in_op.borrow_mut()._traverse_fwd(epoch, apply);
+    apply(self);
+    self.node.pop(epoch);
+  }
+
+  fn _traverse_bwd(&mut self, epoch: u64, apply: &mut FnMut(&mut DiffOperator<SampleItem, IoBuf>)) {
+    self.node.push(epoch);
+    assert!(self.node.limit(1));
+    apply(self);
+    self.in_op.borrow_mut()._traverse_bwd(epoch, apply);
+    self.node.pop(epoch);
+  }
+
+  fn _forward(&mut self, _phase: OpPhase) {
+    let batch_size = self.in_.batch_sz.get();
+    let in_buf = self.in_.buf.borrow();
+
+    in_buf.as_ref().wait(&self.stream.conn());
+    self.t_mean.as_ref().wait(&self.stream.conn());
+    self.loss.as_ref().wait(&self.stream.conn());
+    unsafe { neuralops_cuda_gaussian_kl_loss_fwd(
+        in_buf.as_ref().as_ptr(),
+        batch_size as _,
+        self.t_mean.as_ref().as_ptr(),
+        self.emp_var,
+        self.t_var,
+        self.loss.as_mut().as_mut_ptr(),
+        self.stream.conn().raw_stream().ptr,
+    ) };
+    in_buf.as_ref().post(&self.stream.conn());
+    self.t_mean.as_ref().post(&self.stream.conn());
+    self.loss.as_ref().post(&self.stream.conn());
+
+    in_buf.as_ref().store_sync(&mut self.h_pred, self.stream.conn());
+    self.loss.as_ref().store_sync(&mut self.h_loss, self.stream.conn());
+  }
+
+  fn _backward(&mut self) {
+    unimplemented!();
+  }
+}
+
 pub struct DeviceLstSqLoss<S, IoBuf: ?Sized> {
   cfg:      LstSqLossConfig,
   node:     OperatorNode,

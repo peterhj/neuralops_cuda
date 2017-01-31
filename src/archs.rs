@@ -125,6 +125,7 @@ pub fn build_cifar10_affine_kl_loss<IoBuf: ?Sized + 'static>(batch_sz: usize, st
   let loss_cfg = CategoricalKLLossConfig{
     batch_sz:   batch_sz,
     num_cats:   10,
+    epsilon:    None,
   };
   let input = DeviceVarInputOperator::new(input_cfg, OpCapability::Backward, stream.clone());
   let affine1 = DeviceAffineOperator::new(affine1_cfg, OpCapability::Backward, input, 0, stream.clone());
@@ -202,6 +203,7 @@ pub fn build_cifar10_simpleconv_kl_loss<IoBuf: ?Sized + 'static>(batch_sz: usize
   let loss_cfg = CategoricalKLLossConfig{
     batch_sz:   batch_sz,
     num_cats:   10,
+    epsilon:    None,
   };
   let input = DeviceVarInputOperator::new(input_cfg, OpCapability::Backward, stream.clone());
   let conv1 = DeviceConv2dOperator::new(conv1_cfg, OpCapability::Backward, input, 0, stream.clone());

@@ -18,6 +18,7 @@ fn main() {
     .file("clamp.cu")
     .file("conv.cu")
     .file("conv_batchnorm.cu")
+    .file("gaussian.cu")
     .file("image.cu")
     .file("interpolate.cu")
     .file("linear.cu")

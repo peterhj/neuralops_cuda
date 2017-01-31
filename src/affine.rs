@@ -450,7 +450,17 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceAffineOperator<S, IoBuf>
           self.stream.conn(),
       );
     if self.cfg.bias {
-      unimplemented!();
+      self.tmp.r_val.as_mut().as_ref().wait(&self.stream.conn());
+      self.bias.r_dir.as_ref().as_view().wait(&self.stream.conn());
+      unsafe { neuralops_cuda_linear_bias_fwd_inplace(
+          self.tmp.r_val.as_mut().as_mut().as_mut_ptr(),
+          self.cfg.out_dim,
+          batch_size,
+          self.bias.r_dir.as_ref().as_view().as_ptr(),
+          self.stream.conn().raw_stream().ptr,
+      ) };
+      self.tmp.r_val.as_mut().as_ref().post(&self.stream.conn());
+      self.bias.r_dir.as_ref().as_view().post(&self.stream.conn());
     }
 
     self.act_kern._r_forward(batch_size, self.tmp_buf.as_ref(), self.tmp.r_val.as_ref().as_ref(), self.out.data.r_val.as_mut().as_mut(), self.stream.conn());
@@ -479,7 +489,17 @@ impl<S, IoBuf: ?Sized> DiffOperator<S, IoBuf> for DeviceAffineOperator<S, IoBuf>
           self.stream.conn(),
       );
     if self.cfg.bias {
-      unimplemented!();
+      self.tmp.r_grad.as_ref().as_ref().wait(&self.stream.conn());
+      self.bias.r_grad.as_mut().as_view().wait(&self.stream.conn());
+      unsafe { neuralops_cuda_linear_bias_bwd(
+          self.tmp.r_grad.as_ref().as_ref().as_ptr(),
+          self.cfg.out_dim,
+          batch_size,
+          self.bias.r_grad.as_mut().as_view_mut().as_mut_ptr(),
+          self.stream.conn().raw_stream().ptr,
+      ) };
+      self.tmp.r_grad.as_ref().as_ref().post(&self.stream.conn());
+      self.bias.r_grad.as_mut().as_view().post(&self.stream.conn());
     }
 
     self.in_.data.r_grad.as_mut().as_mut().reshape_mut((self.cfg.in_dim, batch_size))

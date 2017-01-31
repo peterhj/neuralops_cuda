@@ -272,6 +272,7 @@ impl DeviceSoftmaxNLLKernel {
 pub struct DeviceSoftmaxKLKernel {
   batch_sz:     usize,
   dim:          usize,
+  epsilon:      Option<f32>,
   logit:        DeviceMem<f32>,
   max_logit:    DeviceMem<f32>,
   factor:       DeviceMem<f32>,
@@ -282,10 +283,11 @@ pub struct DeviceSoftmaxKLKernel {
 }
 
 impl DeviceSoftmaxKLKernel {
-  pub fn new(batch_sz: usize, dim: usize, stream: DeviceStream) -> Self {
+  pub fn new(batch_sz: usize, dim: usize, epsilon: Option<f32>, stream: DeviceStream) -> Self {
     DeviceSoftmaxKLKernel{
       batch_sz:     batch_sz,
       dim:          dim,
+      epsilon:      epsilon,
       logit:        DeviceMem::zeros(batch_sz * dim, stream.conn()),
       max_logit:    DeviceMem::zeros(batch_sz, stream.conn()),
       factor:       DeviceMem::zeros(batch_sz * dim, stream.conn()),
@@ -354,6 +356,7 @@ impl DeviceSoftmaxKLKernel {
         self.dim as _,
         batch_size as _,
         target.as_ptr(),
+        self.epsilon.unwrap_or(0.0),
         loss.as_mut_ptr(),
         conn.raw_stream().ptr,
     ) };
@@ -485,7 +488,7 @@ impl DeviceSoftmaxKLKernel {
   }
 }
 
-pub struct DeviceSoftmaxIndKernel {
+pub struct DeviceSoftmaxLRKernel {
   batch_sz:     usize,
   dim:          usize,
   logit:        DeviceMem<f32>,
@@ -494,9 +497,9 @@ pub struct DeviceSoftmaxIndKernel {
   sum_factor:   DeviceMem<f32>,
 }
 
-impl DeviceSoftmaxIndKernel {
+impl DeviceSoftmaxLRKernel {
   pub fn new(batch_sz: usize, dim: usize, stream: DeviceStream) -> Self {
-    DeviceSoftmaxIndKernel{
+    DeviceSoftmaxLRKernel{
       batch_sz:     batch_sz,
       dim:          dim,
       logit:        DeviceMem::zeros(batch_sz * dim, stream.conn()),
@@ -509,7 +512,7 @@ impl DeviceSoftmaxIndKernel {
     }
   }
 
-  pub fn _forward<'a>(&'a mut self, batch_size: usize, in_buf: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, mut prob: DeviceMemRefMut<'a, f32>, mut loss: DeviceMemRefMut<'a, f32>, stream: DeviceStream) {
+  pub fn _forward<'a>(&'a mut self, batch_size: usize, cutoff: f32, in_buf: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, targets: DeviceMemRef<'a, f32>, weights: DeviceMemRef<'a, f32>, mut prob: DeviceMemRefMut<'a, f32>, mut loss: DeviceMemRefMut<'a, f32>, stream: DeviceStream) {
     assert!(batch_size <= self.batch_sz);
     assert!(self.dim <= 1024);
 
@@ -565,12 +568,14 @@ impl DeviceSoftmaxIndKernel {
         self.sum_factor.as_ref().as_ptr(),
         stream.conn().raw_stream().ptr,
     ) };
-    unsafe { neuralops_cuda_softmax_ind_loss_fwd(
+    unsafe { neuralops_cuda_softmax_lr_loss_fwd(
         self.factor.as_ref().as_ptr(),
         self.dim as _,
         batch_size as _,
         labels.as_ptr(),
+        targets.as_ptr(),
         weights.as_ptr(),
+        cutoff,
         loss.as_mut_ptr(),
         stream.conn().raw_stream().ptr,
     ) };
@@ -584,7 +589,7 @@ impl DeviceSoftmaxIndKernel {
     prob.slice_mut(0, batch_size * self.dim).copy(self.factor.as_ref().slice(0, batch_size * self.dim), stream.conn());
   }
 
-  pub fn _backward<'a>(&'a self, batch_size: usize, prob: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, weights: DeviceMemRef<'a, f32>, mut in_grad: DeviceMemRefMut<'a, f32>, stream: DeviceStream) {
+  pub fn _backward<'a>(&'a self, batch_size: usize, cutoff: f32, prob: DeviceMemRef<'a, f32>, labels: DeviceMemRef<'a, u32>, targets: DeviceMemRef<'a, f32>, weights: DeviceMemRef<'a, f32>, mut in_grad: DeviceMemRefMut<'a, f32>, stream: DeviceStream) {
     assert!(batch_size <= self.batch_sz);
 
     let conn = stream.conn();
@@ -593,12 +598,14 @@ impl DeviceSoftmaxIndKernel {
     weights.wait(&conn);
     in_grad.wait(&conn);
 
-    unsafe { neuralops_cuda_softmax_ind_loss_bwd(
+    unsafe { neuralops_cuda_softmax_lr_loss_bwd(
         prob.as_ptr(),
         self.dim as _,
         batch_size as _,
         labels.as_ptr(),
+        targets.as_ptr(),
         weights.as_ptr(),
+        cutoff,
         in_grad.as_mut_ptr(),
         conn.raw_stream().ptr,
     ) };

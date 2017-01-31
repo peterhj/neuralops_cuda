@@ -174,6 +174,15 @@ extern "C" {
       in_grad: *mut f32,
       stream: cudaStream_t);
 
+  pub fn neuralops_cuda_gaussian_kl_loss_fwd(
+      mean: *const f32,
+      batch_sz: u32,
+      target_mean: *const f32,
+      var: f32,
+      target_var: f32,
+      loss: *mut f32,
+      stream: cudaStream_t);
+
   pub fn neuralops_cuda_image2d_crop(
       in_pixels: *const f32,
       in_width: size_t, in_height: size_t, channels: size_t,
@@ -319,21 +328,25 @@ extern "C" {
       xs_sum: *mut f32,
       stream: cudaStream_t);
 
-  pub fn neuralops_cuda_softmax_ind_loss_fwd(
+  pub fn neuralops_cuda_softmax_lr_loss_fwd(
       ys: *const f32,
       dim: u32,
       batch_sz: u32,
       labels: *const u32,
+      targets: *const f32,
       weights: *const f32,
+      cutoff: f32,
       loss: *mut f32,
       stream: cudaStream_t,
   );
-  pub fn neuralops_cuda_softmax_ind_loss_bwd(
+  pub fn neuralops_cuda_softmax_lr_loss_bwd(
       ys: *const f32,
       dim: u32,
       batch_sz: u32,
       labels: *const u32,
+      targets: *const f32,
       weights: *const f32,
+      cutoff: f32,
       grad: *mut f32,
       stream: cudaStream_t,
   );
@@ -342,6 +355,7 @@ extern "C" {
       dim: u32,
       batch_sz: u32,
       targets: *const f32,
+      epsilon: f32,
       loss: *mut f32,
       stream: cudaStream_t,
   );

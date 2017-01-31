@@ -3,12 +3,14 @@
 
 #define OFFSET_BANK(idx) ({ __typeof__ (idx) _idx = idx; ((_idx) + ((_idx) / 32)); })
 
-__global__ void softmax_ind_loss_fwd_kernel(
+__global__ void softmax_lr_loss_fwd_kernel(
     const float *ys,
     uint32_t dim,
     uint32_t batch_sz,
     const uint32_t *labels,
+    const float *targets,
     const float *weights,
+    float cutoff,
     float *loss)
 {
   uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
@@ -16,29 +18,38 @@ __global__ void softmax_ind_loss_fwd_kernel(
   uint32_t batch_idx = idx / dim;
   if (j < dim && batch_idx < batch_sz) {
     uint32_t label = labels[batch_idx];
-    loss[batch_idx] = weights[batch_idx] * ys[label + dim * batch_idx];
+    float ratio = ys[label + dim * batch_idx] / targets[batch_idx];
+    // FIXME(20170130): also check for inf, nan, negative.
+    if (cutoff < ratio) {
+      ratio = cutoff;
+    }
+    loss[batch_idx] = weights[batch_idx] * ratio;
   }
 }
 
-extern "C" void neuralops_cuda_softmax_ind_loss_fwd(
+extern "C" void neuralops_cuda_softmax_lr_loss_fwd(
     const float *ys,
     uint32_t dim,
     uint32_t batch_sz,
     const uint32_t *labels,
+    const float *targets,
     const float *weights,
+    float cutoff,
     float *loss,
     cudaStream_t stream)
 {
-  softmax_ind_loss_fwd_kernel<<<(batch_sz+1024-1)/1024, 1024, 0, stream>>>(
-      ys, dim, batch_sz, labels, weights, loss);
+  softmax_lr_loss_fwd_kernel<<<(batch_sz+1024-1)/1024, 1024, 0, stream>>>(
+      ys, dim, batch_sz, labels, targets, weights, cutoff, loss);
 }
 
-__global__ void softmax_ind_loss_bwd_kernel(
+__global__ void softmax_lr_loss_bwd_kernel(
     const float *ys,
     uint32_t dim,
     uint32_t batch_sz,
     const uint32_t *labels,
+    const float *targets,
     const float *weights,
+    float cutoff,
     float *grad)
 {
   uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
@@ -46,27 +57,36 @@ __global__ void softmax_ind_loss_bwd_kernel(
   uint32_t batch_idx = idx / dim;
   if (j < dim && batch_idx < batch_sz) {
     uint32_t label = labels[batch_idx];
-    float w = weights[batch_idx];
-    float y_j = ys[idx];
-    if (label == j) {
-      grad[idx] = w * y_j * (1.0f - y_j);
+    float y_label = ys[label + dim * batch_idx];
+    float ratio = y_label / targets[batch_idx];
+    // FIXME(20170130): also check for inf, nan, negative.
+    if (cutoff < ratio) {
+      grad[idx] = 0.0f;
     } else {
-      grad[idx] = -w * y_j * ys[label + dim * batch_idx];
+      float w = weights[batch_idx];
+      float y_j = ys[idx];
+      if (label == j) {
+        grad[idx] = w * ratio * (1.0f - y_j);
+      } else {
+        grad[idx] = -w * ratio * y_j;
+      }
     }
   }
 }
 
-extern "C" void neuralops_cuda_softmax_ind_loss_bwd(
+extern "C" void neuralops_cuda_softmax_lr_loss_bwd(
     const float *ys,
     uint32_t dim,
     uint32_t batch_sz,
     const uint32_t *labels,
+    const float *targets,
     const float *weights,
+    float cutoff,
     float *grad,
     cudaStream_t stream)
 {
-  softmax_ind_loss_bwd_kernel<<<(batch_sz+1024-1)/1024, 1024, 0, stream>>>(
-      ys, dim, batch_sz, labels, weights, grad);
+  softmax_lr_loss_bwd_kernel<<<(batch_sz+1024-1)/1024, 1024, 0, stream>>>(
+      ys, dim, batch_sz, labels, targets, weights, cutoff, grad);
 }
 
 __global__ void softmax_kl_loss_fwd_kernel(
@@ -74,6 +94,7 @@ __global__ void softmax_kl_loss_fwd_kernel(
     uint32_t dim,
     uint32_t batch_sz,
     const float *targets,
+    float epsilon,
     float *loss)
 {
   __shared__ float cache[1024 + 32];
@@ -83,8 +104,15 @@ __global__ void softmax_kl_loss_fwd_kernel(
   if (j < dim && batch_idx < batch_sz) {
     float t = targets[idx];
     float y = ys[idx];
-    float kl_j = t * (logf(t) - logf(y));
-    cache[OFFSET_BANK(j)] = kl_j;
+    t += epsilon * (1.0f - t);
+    y += epsilon * (1.0f - y);
+    float kl;
+    if (t > 0.0f) {
+      kl = t * (logf(t) - logf(y));
+    } else {
+      kl = -t * logf(y);
+    }
+    cache[OFFSET_BANK(j)] = kl;
   } else {
     cache[OFFSET_BANK(j)] = 0.0f;
   }
@@ -109,12 +137,13 @@ extern "C" void neuralops_cuda_softmax_kl_loss_fwd(
     uint32_t dim,
     uint32_t batch_sz,
     const float *targets,
+    float epsilon,
     float *loss,
     cudaStream_t stream)
 {
   //assert(dim <= 1024);
   softmax_kl_loss_fwd_kernel<<<batch_sz, 1024, 0, stream>>>(
-      ys, dim, batch_sz, targets, loss);
+      ys, dim, batch_sz, targets, epsilon, loss);
 }
 
 __global__ void softmax_kl_loss_bwd_kernel(
